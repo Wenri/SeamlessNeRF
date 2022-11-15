@@ -232,7 +232,9 @@ def Hull_Simplification_determined_version(data, output_prefix, num_thres=0.1, e
     # with open( output_prefix+"-original_hull_vertices.json", 'w' ) as myfile:
     #     json.dump({'vs': (hull.points[ hull.vertices ].clip(0.0,1.0)*255).tolist(),'faces': (hull.points[ hull.simplices ].clip(0.0,1.0)*255).tolist()}, myfile, indent = 4 )
 
-    write_convexhull_into_obj_file(hull, output_rawhull_obj_file := io.StringIO())
+    with io.StringIO() as f:
+        write_convexhull_into_obj_file(hull, f)
+        output_rawhull_obj_file = f.getvalue()
 
     if option == "unique_pixel_colors":
         unique_data, pixel_counts = get_unique_colors_and_their_counts(data.reshape((-1, 3)))
@@ -247,14 +249,16 @@ def Hull_Simplification_determined_version(data, output_prefix, num_thres=0.1, e
     for i in range(max_loop):
         if i % 10 == 0:
             print("loop: ", i)
-        mesh = TriMesh.FromOBJ_Lines(output_rawhull_obj_file.getvalue().splitlines())
+        mesh = TriMesh.FromOBJ_Lines(output_rawhull_obj_file.splitlines())
         old_num = len(mesh.vs)
         old_vertices = mesh.vs
         # print ("WHY1")
         mesh = remove_one_edge_by_finding_smallest_adding_volume_with_test_conditions(mesh, option=2)
         #         newhull=ConvexHull(mesh.vs, qhull_options="Qs")
         hull = ConvexHull(mesh.vs)
-        write_convexhull_into_obj_file(hull, output_rawhull_obj_file := io.StringIO())
+        with io.StringIO() as f:
+            write_convexhull_into_obj_file(hull, f)
+            output_rawhull_obj_file = f.getvalue()
         # print ("WHY2")
 
         if len(hull.vertices) <= 10:

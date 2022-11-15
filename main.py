@@ -1,3 +1,4 @@
+import gzip
 import os
 import time
 from pathlib import Path
@@ -23,8 +24,8 @@ def save_weights(img, palette_rgb, mixing_weights, output_prefix):
     print('RMSE: ', np.sqrt(diff.sum() / diff.shape[0]))
 
     import json
-    mixing_weights_filename = output_prefix + "-palette_size-" + str(len(palette_rgb)) + "-mixing_weights.js"
-    with open(mixing_weights_filename, 'w') as myfile:
+    mixing_weights_filename = output_prefix + "-palette_size-" + str(len(palette_rgb)) + "-mixing_weights.json.gz"
+    with gzip.open(mixing_weights_filename, 'wt') as myfile:
         json.dump({'weights': mixing_weights.tolist()}, myfile)
 
     for i in range(mixing_weights.shape[-1]):
