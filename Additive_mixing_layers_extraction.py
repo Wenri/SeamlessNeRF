@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import print_function, division
 
+import gzip
 import json
+import sys
 import time
 
 import PIL.Image as Image
@@ -47,7 +49,7 @@ def Hull_Simplification_unspecified_M(data, output_prefix, start_save=10):
     hull = ConvexHull(data.reshape((-1, 3)))
     origin_vertices = hull.points[hull.vertices]
     print("original hull vertices number: ", len(hull.vertices))
-    # with open( output_prefix+"-original_hull_vertices.js", 'w' ) as myfile:
+    # with open( output_prefix+"-original_hull_vertices.json", 'w' ) as myfile:
     #     json.dump({'vs': (hull.points[ hull.vertices ].clip(0.0,1.0)*255).tolist(),'faces': (hull.points[ hull.simplices ].clip(0.0,1.0)*255).tolist()}, myfile, indent = 4 )
 
     output_rawhull_obj_file = output_prefix + "-mesh_obj_files.obj"
@@ -64,7 +66,7 @@ def Hull_Simplification_unspecified_M(data, output_prefix, start_save=10):
         write_convexhull_into_obj_file(hull, output_rawhull_obj_file)
 
         if len(hull.vertices) <= start_save:
-            name = output_prefix + "-%02d.js" % len(hull.vertices)
+            name = output_prefix + "-%02d.json" % len(hull.vertices)
             with open(name, 'w') as myfile:
                 json.dump({'vs': (hull.points[hull.vertices].clip(0.0, 1.0) * 255).tolist(),
                            'faces': (hull.points[hull.simplices].clip(0.0, 1.0) * 255).tolist()}, myfile, indent=4)
@@ -225,7 +227,7 @@ def Hull_Simplification_determined_version(data, output_prefix, num_thres=0.1, e
     hull = ConvexHull(data.reshape((-1, 3)))
     origin_vertices = hull.points[hull.vertices]
     print("original hull vertices number: ", len(hull.vertices))
-    # with open( output_prefix+"-original_hull_vertices.js", 'w' ) as myfile:
+    # with open( output_prefix+"-original_hull_vertices.json", 'w' ) as myfile:
     #     json.dump({'vs': (hull.points[ hull.vertices ].clip(0.0,1.0)*255).tolist(),'faces': (hull.points[ hull.simplices ].clip(0.0,1.0)*255).tolist()}, myfile, indent = 4 )
 
     output_rawhull_obj_file = output_prefix + "-mesh_obj_files.obj"
@@ -282,7 +284,7 @@ def Hull_Simplification_determined_version(data, output_prefix, num_thres=0.1, e
                 oldhull = ConvexHull(old_vertices)
 
                 if SAVE:
-                    name = output_prefix + "-%02d.js" % len(oldhull.vertices)
+                    name = output_prefix + "-%02d.json" % len(oldhull.vertices)
                     with open(name, 'w') as myfile:
                         json.dump({'vs': (oldhull.points[oldhull.vertices].clip(0.0, 1.0) * 255).tolist(),
                                    'faces': (oldhull.points[oldhull.simplices].clip(0.0, 1.0) * 255).tolist()}, myfile,
@@ -293,7 +295,7 @@ def Hull_Simplification_determined_version(data, output_prefix, num_thres=0.1, e
         if len(hull.vertices) == old_num or len(hull.vertices) == 4:
 
             if SAVE:
-                name = output_prefix + "-%02d.js" % len(hull.vertices)
+                name = output_prefix + "-%02d.json" % len(hull.vertices)
                 with open(name, 'w') as myfile:
                     json.dump({'vs': (hull.points[hull.vertices].clip(0.0, 1.0) * 255).tolist(),
                                'faces': (hull.points[hull.simplices].clip(0.0, 1.0) * 255).tolist()}, myfile, indent=4)
@@ -373,7 +375,7 @@ def recover_ASAP_weights_using_scipy_delaunay(Hull_vertices, data, option=1):
 
 
 def Get_ASAP_weights_using_Tan_2016_triangulation_and_then_barycentric_coordinates(
-        img_label_origin, origin_order_tetra_prime, outprefix='', order=0, DEMO=False):
+        img_label_origin, origin_order_tetra_prime, outprefix='', order=0, SAVE=False):
     img_label = img_label_origin.copy()  ### do not modify img_label_origin
 
     if isinstance(order, (list, tuple, np.ndarray)):
@@ -521,15 +523,16 @@ def Get_ASAP_weights_using_Tan_2016_triangulation_and_then_barycentric_coordinat
     print('median diff', np.median(np.sqrt(diff)))
     print('RMSE: ', np.sqrt(diff.sum() / diff.shape[0]))
 
-    if DEMO == False:
+    fn_name: str = sys._getframe().f_code.co_name.removeprefix('Get_')
+    if SAVE:
         mixing_weights_filename = outprefix + '-' + str(
-            len(origin_order_tetra_prime)) + "-RGB_ASAP-using_Tan2016_triangulation_and_then_barycentric_coordinates-linear_mixing-weights.js"
-        with open(mixing_weights_filename, 'w') as myfile:
+            len(origin_order_tetra_prime)) + f"-RGB_{fn_name}-linear_mixing-weights.json.gz"
+        with gzip.open(mixing_weights_filename, 'wt') as myfile:
             json.dump({'weights': origin_order_mixing_weights.tolist()}, myfile)
 
         for i in range(origin_order_mixing_weights.shape[-1]):
             mixing_weights_map_filename = outprefix + '-' + str(
-                len(origin_order_tetra_prime)) + "-RGB_ASAP-using_Tan2016_triangulation_and_then_barycentric_coordinates-linear_mixing-weights_map-%02d.png" % i
+                len(origin_order_tetra_prime)) + f"-RGB_{fn_name}-linear_mixing-weights_map-%02d.png" % i
             Image.fromarray((origin_order_mixing_weights[:, :, i] * 255).round().clip(0, 255).astype(np.uint8)).save(
                 mixing_weights_map_filename)
 

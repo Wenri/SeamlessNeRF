@@ -806,10 +806,11 @@ class TriMesh(object):
     def FromOBJ_FileName(obj_fname):
         if obj_fname.endswith('.gz'):
             import gzip
-            f = gzip.open(obj_fname)
+            func = gzip.open
         else:
-            f = open(obj_fname)
-        return TriMesh.FromOBJ_Lines(f)
+            func = open
+        with func(obj_fname) as f:
+            return TriMesh.FromOBJ_Lines(f)
 
     @staticmethod
     def FromOBJ_Lines(obj_lines):

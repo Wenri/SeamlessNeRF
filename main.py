@@ -1,3 +1,4 @@
+import os
 import time
 from pathlib import Path
 
@@ -43,7 +44,7 @@ def get_bigger_palette_to_show(palette):
     return palette2
 
 
-def print_hi(filepath):
+def print_hi(filepath: str | os.PathLike[str]):
     filepath = Path(filepath)
     img = np.asfarray(Image.open(filepath).convert('RGB')) / 255.0
     arr = img.copy()
@@ -61,17 +62,15 @@ def print_hi(filepath):
     print("palette extraction time: ", end - start)
 
     palette_img = get_bigger_palette_to_show(palette_rgb)
-    Image.fromarray((palette_img * 255).round().astype(np.uint8)).save(
-        filepath.stem + "-convexhull_vertices.png")
+    Image.fromarray((palette_img * 255).round().astype(np.uint8)).save(filepath.stem + "-convexhull_vertices.png")
 
     ######### for RGBXY RGB black star triangulation.
     start = time.time()
     data_hull = ConvexHull(data.reshape((-1, 5)))
     start2 = time.time()
-    print(
-        "convexhull on 5D time: ", start2 - start)
+    print("convexhull on 5D time: ", start2 - start)
     mixing_weights_1 = Get_ASAP_weights_using_Tan_2016_triangulation_and_then_barycentric_coordinates(
-        img.reshape((-1, 3))[data_hull.vertices].reshape((-1, 1, 3)), palette_rgb, "None", order=0, DEMO=True)
+        img.reshape((-1, 3))[data_hull.vertices].reshape((-1, 1, 3)), palette_rgb, "None", order=0, SAVE=True)
     mixing_weights_2 = recover_ASAP_weights_using_scipy_delaunay(
         data_hull.points[data_hull.vertices], data_hull.points, option=3)
 
