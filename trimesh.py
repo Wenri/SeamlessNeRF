@@ -1,14 +1,14 @@
 from __future__ import print_function, division
 
-from numpy import *
+import numpy as np
 
 
 def mag2(vec):
-    return dot(vec, vec)
+    return np.dot(vec, vec)
 
 
 def mag(vec):
-    return sqrt(mag2(vec))
+    return np.sqrt(mag2(vec))
 
 
 class TriMesh(object):
@@ -41,17 +41,17 @@ class TriMesh(object):
         ## But in case they weren't stored as arrays, return them as the type they were.
         ## This is important if they were lists, and someone expected to be able to call
         ## .append() or .extend() on them.
-        result.vs = array(self.vs)
-        if not isinstance(self.vs, ndarray):
+        result.vs = np.array(self.vs)
+        if not isinstance(self.vs, np.ndarray):
             result.vs = type(self.vs)(result.vs)
 
-        result.faces = array(self.faces)
-        if not isinstance(self.faces, ndarray):
+        result.faces = np.array(self.faces)
+        if not isinstance(self.faces, np.ndarray):
             result.faces = type(self.faces)(result.faces)
 
         if hasattr(self, 'uvs'):
-            result.uvs = array(self.uvs)
-            if not isinstance(self.uvs, ndarray):
+            result.uvs = np.array(self.uvs)
+            if not isinstance(self.uvs, np.ndarray):
                 result.uvs = type(self.uvs)(result.uvs)
 
         ## I could skip copying these cached values, but they are usually needed for rendering
@@ -88,8 +88,8 @@ class TriMesh(object):
         return result
 
     def update_face_normals_and_areas(self):
-        if self.__face_normals is None: self.__face_normals = zeros((len(self.faces), 3))
-        if self.__face_areas is None: self.__face_areas = zeros(len(self.faces))
+        if self.__face_normals is None: self.__face_normals = np.zeros((len(self.faces), 3))
+        if self.__face_areas is None: self.__face_areas = np.zeros(len(self.faces))
 
         ## We need subtraction between vertices.
         ## Convert vertices to arrays once here, or else we'd have to call asarray()
@@ -99,8 +99,8 @@ class TriMesh(object):
         ##         assumption that self.vs is whatever indexable type they left it.
         ##         In particular, this violates the ability of someone to .append() or .extend()
         ##         self.vs.
-        vs = asarray(self.vs)
-        fs = asarray(self.faces, dtype=int)
+        vs = np.asarray(self.vs)
+        fs = np.asarray(self.faces, dtype=int)
 
         ## Slow:
         '''
@@ -117,9 +117,9 @@ class TriMesh(object):
         ## ~Slow
 
         ## Fast:
-        self.__face_normals = cross(vs[fs[:, 1]] - vs[fs[:, 0]], vs[fs[:, 2]] - vs[fs[:, 1]])
-        self.__face_areas = sqrt((self.__face_normals ** 2).sum(axis=1))
-        self.__face_normals /= self.__face_areas[:, newaxis]
+        self.__face_normals = np.cross(vs[fs[:, 1]] - vs[fs[:, 0]], vs[fs[:, 2]] - vs[fs[:, 1]])
+        self.__face_areas = np.sqrt((self.__face_normals ** 2).sum(axis=1))
+        self.__face_normals /= self.__face_areas[:, np.newaxis]
         self.__face_areas *= 0.5
         ## ~Fast
 
@@ -139,7 +139,7 @@ class TriMesh(object):
     face_areas = property(get_face_areas)
 
     def update_vertex_normals(self):
-        if self.__vertex_normals is None: self.__vertex_normals = zeros((len(self.vs), 3))
+        if self.__vertex_normals is None: self.__vertex_normals = np.zeros((len(self.vs), 3))
 
         ## Slow:
         '''
@@ -159,11 +159,11 @@ class TriMesh(object):
         ## ~Slow
 
         ## Fast:
-        fs = asarray(self.faces, dtype=int)
+        fs = np.asarray(self.faces, dtype=int)
         ## This matches the OpenMesh FAST vertex normals.
         # fns = self.face_normals
         ## Area weighted
-        fns = self.face_normals * self.face_areas[:, newaxis]
+        fns = self.face_normals * self.face_areas[:, np.newaxis]
 
         self.__vertex_normals[:] = 0.
         ## I wish this worked, but it doesn't do the right thing with aliasing
@@ -176,7 +176,7 @@ class TriMesh(object):
             for i, n in itertools.izip(fs[:, c], fns):
                 self.__vertex_normals[i] += n
 
-        self.__vertex_normals /= sqrt((self.__vertex_normals ** 2).sum(axis=1))[:, newaxis]
+        self.__vertex_normals /= np.sqrt((self.__vertex_normals ** 2).sum(axis=1))[:, np.newaxis]
         ## ~Fast
 
         assert len(self.vs) == len(self.__vertex_normals)
@@ -188,7 +188,7 @@ class TriMesh(object):
     vertex_normals = property(get_vertex_normals)
 
     def update_vertex_areas(self):
-        if self.__vertex_areas is None: self.__vertex_areas = zeros(len(self.vs))
+        if self.__vertex_areas is None: self.__vertex_areas = np.zeros(len(self.vs))
 
         ## Slow:
         '''
@@ -221,7 +221,7 @@ class TriMesh(object):
         ##       (This only matters for obtuse triangles.)
         self.__vertex_areas[:] = 0.
 
-        fs = asarray(self.faces, dtype=int)
+        fs = np.asarray(self.faces, dtype=int)
         fas = self.__face_areas
         ## I wish this worked, but it doesn't do the right thing with aliasing
         ## (when the same element appears multiple times in the slice).
@@ -407,7 +407,7 @@ class TriMesh(object):
         """
 
         he = self.halfedges[he_index]
-        return (self.halfedges[he.opposite_he].to_vertex, he.to_vertex)
+        return self.halfedges[he.opposite_he].to_vertex, he.to_vertex
 
     def directed_edge2he_index(self, edge):
         """
@@ -549,7 +549,7 @@ class TriMesh(object):
         """
 
         ## Set mesh.vs to an array so that subsequent calls to asarray() on it are no-ops.
-        self.vs = asarray(self.vs)
+        self.vs = np.asarray(self.vs)
 
         #### jianchao's modification begin
         # self.vs=list(self.vs)
@@ -592,10 +592,10 @@ class TriMesh(object):
         ## ~Fast
 
         ## Faster:
-        vertex_has_face = zeros(len(self.vs), dtype=bool)
-        self.faces = asarray(self.faces)
+        vertex_has_face = np.zeros(len(self.vs), dtype=bool)
+        self.faces = np.asarray(self.faces)
         vertex_has_face[self.faces.ravel()] = True
-        return where(vertex_has_face == 0)[0]
+        return np.where(vertex_has_face == 0)[0]
         ## ~Faster
 
     def remove_vertex_indices(self, vertex_indices_to_remove):
@@ -615,7 +615,7 @@ class TriMesh(object):
         ## function on dangling vertices).
         # assert 0 == len( self.get_dangling_vertices() )
 
-        if 0 == len(vertex_indices_to_remove): return arange(len(self.vs))
+        if 0 == len(vertex_indices_to_remove): return np.arange(len(self.vs))
 
         ## Slow:
         '''
@@ -648,24 +648,24 @@ class TriMesh(object):
 
         ## Fast:
         ## Make a map from old to new vertices.  This is the return value.
-        old2new = -ones(len(self.vs), dtype=int)
+        old2new = -np.ones(len(self.vs), dtype=int)
         ## Later versions of numpy.setdiff1d(), such as 2.0, return a unique, sorted array
         ## and do not assume that inputs are unique.
         ## Earlier versions, such as 1.4, require unique inputs and don't say
         ## anything about sorted output.
         ## (We don't know that 'vertex_indices_to_remove' is unique!)
-        keep_vertices = sort(setdiff1d(arange(len(self.vs)), unique(vertex_indices_to_remove)))
-        old2new[keep_vertices] = arange(len(keep_vertices))
+        keep_vertices = np.sort(np.setdiff1d(np.arange(len(self.vs)), np.unique(vertex_indices_to_remove)))
+        old2new[keep_vertices] = np.arange(len(keep_vertices))
 
         ## Remove vertices from vs, faces, edges, and optionally uvs.
         ## Fast:
-        self.vs = asarray(self.vs)
+        self.vs = np.asarray(self.vs)
         self.vs = self.vs[keep_vertices, :]
         if hasattr(self, 'uvs'):
-            self.uvs = asarray(self.uvs)
+            self.uvs = np.asarray(self.uvs)
             self.uvs = self.uvs[keep_vertices, :]
 
-        self.faces = asarray(self.faces)
+        self.faces = np.asarray(self.faces)
         self.faces = old2new[self.faces]
         self.faces = self.faces[(self.faces != -1).all(axis=1)]
         ## ~Fast
@@ -706,22 +706,22 @@ class TriMesh(object):
         used
         """
 
-        if 0 == len(face_indices_to_remove): return arange(len(self.faces))
+        if 0 == len(face_indices_to_remove): return np.arange(len(self.faces))
 
         ## Fast:
         ## Make a map from old to new faces.  This is the return value.
-        old2new = -ones(len(self.faces), dtype=int)
+        old2new = -np.ones(len(self.faces), dtype=int)
         ## Later versions of numpy.setdiff1d(), such as 2.0, return a unique, sorted array
         ## and do not assume that inputs are unique.
         ## Earlier versions, such as 1.4, require unique inputs and don't say
         ## anything about sorted output.
         ## (We don't know that 'face_indices_to_remove' is unique!)
-        keep_faces = sort(setdiff1d(arange(len(self.faces)), unique(face_indices_to_remove)))
-        old2new[keep_faces] = arange(len(keep_faces))
+        keep_faces = np.sort(np.setdiff1d(np.arange(len(self.faces)), np.unique(face_indices_to_remove)))
+        old2new[keep_faces] = np.arange(len(keep_faces))
 
         ## Remove vertices from vs, faces, edges, and optionally uvs.
         ## Fast:
-        self.faces = asarray(self.faces)
+        self.faces = np.asarray(self.faces)
         self.faces = self.faces[keep_faces, :]
         ## ~Fast
 
@@ -753,7 +753,7 @@ class TriMesh(object):
         vertex_offset = len(self.vs)
 
         self.vs = list(self.vs) + list(mesh.vs)
-        self.faces = list(self.faces) + list(asarray(mesh.faces, dtype=int) + vertex_offset)
+        self.faces = list(self.faces) + list(np.asarray(mesh.faces, dtype=int) + vertex_offset)
 
         ## If there are uvs, concatenate them.
 
@@ -777,13 +777,13 @@ class TriMesh(object):
         self.topology_changed()
 
         if self__face_normals is not None and mesh.__face_normals is not None:
-            self.__face_normals = append(self__face_normals, mesh.__face_normals, axis=0)
+            self.__face_normals = np.append(self__face_normals, mesh.__face_normals, axis=0)
         if self__face_areas is not None and mesh.__face_areas is not None:
-            self.__face_areas = append(self__face_areas, mesh.__face_areas, axis=0)
+            self.__face_areas = np.append(self__face_areas, mesh.__face_areas, axis=0)
         if self__vertex_normals is not None and mesh.__vertex_normals is not None:
-            self.__vertex_normals = append(self__vertex_normals, mesh.__vertex_normals, axis=0)
+            self.__vertex_normals = np.append(self__vertex_normals, mesh.__vertex_normals, axis=0)
         if self__vertex_areas is not None and mesh.__vertex_areas is not None:
-            self.__vertex_areas = append(self__vertex_areas, mesh.__vertex_areas, axis=0)
+            self.__vertex_areas = np.append(self__vertex_areas, mesh.__vertex_areas, axis=0)
 
     @staticmethod
     def FromTriMeshes(meshes):
@@ -859,9 +859,9 @@ class TriMesh(object):
                 # assert all([ ind < len( result.vs ) for ind in face_vertex_ids ])
                 result.faces.append(face_vertex_ids)
 
-        result.vs = asarray(result.vs)
-        result.faces = asarray(result.faces, dtype=int)
-        assert logical_and(result.faces >= 0, result.faces < len(result.vs)).all()
+        result.vs = np.asarray(result.vs)
+        result.faces = np.asarray(result.faces, dtype=int)
+        assert np.logical_and(result.faces >= 0, result.faces < len(result.vs)).all()
 
         return result
 
@@ -923,9 +923,9 @@ class TriMesh(object):
         print('OBJ written to:', fname)
 
     def write_OFF(self, fname):
-        '''
+        """
         Writes the data out to an OFF file named 'fname'.
-        '''
+        """
 
         out = open(fname, 'w')
 
