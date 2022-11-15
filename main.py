@@ -1,4 +1,5 @@
 import time
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
@@ -43,6 +44,7 @@ def get_bigger_palette_to_show(palette):
 
 
 def print_hi(filepath):
+    filepath = Path(filepath)
     img = np.asfarray(Image.open(filepath).convert('RGB')) / 255.0
     arr = img.copy()
     X, Y = np.mgrid[0:img.shape[0], 0:img.shape[1]]
@@ -52,14 +54,15 @@ def print_hi(filepath):
 
     start = time.time()
     palette_rgb = Hull_Simplification_determined_version(
-        img, filepath[:-4] + "-convexhull_vertices")
+        img, filepath.stem + "-convexhull_vertices", error_thres=1. / 256.)
     end = time.time()
     M = len(palette_rgb)
     print("palette size: ", M)
     print("palette extraction time: ", end - start)
 
     palette_img = get_bigger_palette_to_show(palette_rgb)
-    Image.fromarray((palette_img * 255).round().astype(np.uint8)).save(filepath[:-4] + "-convexhull_vertices.png")
+    Image.fromarray((palette_img * 255).round().astype(np.uint8)).save(
+        filepath.stem + "-convexhull_vertices.png")
 
     ######### for RGBXY RGB black star triangulation.
     start = time.time()
@@ -79,7 +82,7 @@ def print_hi(filepath):
 
     mixing_weights = mixing_weights.reshape((img.shape[0], img.shape[1], -1)).clip(0, 1)
 
-    output_prefix = filepath[:-4] + '-RGBXY_RGB_black_star_ASAP'
+    output_prefix = filepath.stem + '-RGBXY_RGB_black_star_ASAP'
     return save_weights(arr, palette_rgb, mixing_weights, output_prefix)
 
 

@@ -272,12 +272,12 @@ class TriMesh(object):
             self.next_he = -1
 
     def update_halfedges(self):
-        '''
+        """
         Generates all half edge data structures for the mesh given by its vertices 'self.vs'
         and faces 'self.faces'.
-        
+
         untested
-        '''
+        """
 
         self.__halfedges = []
         self.__vertex_halfedges = None
@@ -400,22 +400,22 @@ class TriMesh(object):
         assert False not in [0 == len(out_heis) for out_heis in vertex2outgoing_boundary_hei.values()]
 
     def he_index2directed_edge(self, he_index):
-        '''
+        """
         Given the index of a HalfEdge, returns the corresponding directed edge (i,j).
-        
+
         untested
-        '''
+        """
 
         he = self.halfedges[he_index]
         return (self.halfedges[he.opposite_he].to_vertex, he.to_vertex)
 
     def directed_edge2he_index(self, edge):
-        '''
+        """
         Given a directed edge (i,j), returns the index of the HalfEdge class in
         halfedges().
-        
+
         untested
-        '''
+        """
 
         if self.__directed_edge2he_index is None: self.update_halfedges()
 
@@ -423,11 +423,11 @@ class TriMesh(object):
         return self.__directed_edge2he_index[edge]
 
     def get_halfedges(self):
-        '''
+        """
         Returns a list of all HalfEdge classes.
-        
+
         untested
-        '''
+        """
 
         if self.__halfedges is None: self.update_halfedges()
         return self.__halfedges
@@ -435,11 +435,11 @@ class TriMesh(object):
     halfedges = property(get_halfedges)
 
     def vertex_vertex_neighbors(self, vertex_index):
-        '''
+        """
         Returns the vertex neighbors (as indices) of the vertex 'vertex_index'.
-        
+
         untested
-        '''
+        """
 
         ## It's important to access self.halfedges first (which calls get_halfedges()),
         ## so that we're sure all halfedge info is generated.
@@ -456,20 +456,20 @@ class TriMesh(object):
         return result
 
     def vertex_valence(self, vertex_index):
-        '''
+        """
         Returns the valence (number of vertex neighbors) of vertex with index 'vertex_index'.
-        
+
         untested
-        '''
+        """
 
         return len(self.vertex_vertex_neighbors(vertex_index))
 
     def vertex_face_neighbors(self, vertex_index):
-        '''
+        """
         Returns the face neighbors (as indices) of the vertex 'vertex_index'.
-        
+
         untested
-        '''
+        """
 
         ## It's important to access self.halfedges first (which calls get_halfedges()),
         ## so that we're sure all halfedge info is generated.
@@ -486,11 +486,11 @@ class TriMesh(object):
         return result
 
     def vertex_is_boundary(self, vertex_index):
-        '''
+        """
         Returns whether the vertex with given index is on the boundary.
-        
+
         untested
-        '''
+        """
 
         ## It's important to access self.halfedges first (which calls get_halfedges()),
         ## so that we're sure all halfedge info is generated.
@@ -498,11 +498,11 @@ class TriMesh(object):
         return -1 == halfedges[self.__vertex_halfedges[vertex_index]].face
 
     def boundary_vertices(self):
-        '''
+        """
         Returns a list of the vertex indices on the boundary.
-        
+
         untested
-        '''
+        """
 
         result = []
         for hei, he in enumerate(self.halfedges):
@@ -516,11 +516,11 @@ class TriMesh(object):
         return list(ImmutableSet(result))
 
     def boundary_edges(self):
-        '''
+        """
         Returns a list of boundary edges (i,j).  If (i,j) is in the result, (j,i) will not be.
-        
+
         untested
-        '''
+        """
 
         result = []
         for hei, he in enumerate(self.halfedges):
@@ -529,10 +529,10 @@ class TriMesh(object):
         return result
 
     def positions_changed(self):
-        '''
+        """
         Notify the object that vertex positions changed.
         All position-related structures (normals, areas) will be marked for re-calculation.
-        '''
+        """
 
         self.__face_normals = None
         self.__face_areas = None
@@ -542,11 +542,11 @@ class TriMesh(object):
         self.lifetime_counter += 1
 
     def topology_changed(self):
-        '''
+        """
         Notify the object that topology (faces or #vertices) changed.
         All topology-related structures (halfedges, edge lists) as well as position-related
         structures (normals, areas) will be marked for re-calculation.
-        '''
+        """
 
         ## Set mesh.vs to an array so that subsequent calls to asarray() on it are no-ops.
         self.vs = asarray(self.vs)
@@ -565,9 +565,9 @@ class TriMesh(object):
         self.positions_changed()
 
     def get_dangling_vertices(self):
-        '''
+        """
         Returns vertex indices in TriMesh 'mesh' that belong to no faces.
-        '''
+        """
 
         ## Slow:
         '''
@@ -599,15 +599,15 @@ class TriMesh(object):
         ## ~Faster
 
     def remove_vertex_indices(self, vertex_indices_to_remove):
-        '''
+        """
         Removes vertices in the list of indices 'vertex_indices_to_remove'.
         Also removes faces containing the vertices and dangling vertices.
-        
+
         Returns an array mapping vertex indices before the call
         to vertex indices after the call or -1 if the vertex was removed.
-        
+
         used
-        '''
+        """
 
         ## I can't assert this here because I call this function recursively to remove dangling
         ## vertices.
@@ -696,15 +696,15 @@ class TriMesh(object):
         return old2new
 
     def remove_face_indices(self, face_indices_to_remove):
-        '''
+        """
         Removes faces in the list of indices 'face_indices_to_remove'.
         Also removes dangling vertices.
-        
+
         Returns an array mapping face indices before the call
         to face indices after the call or -1 if the face was removed.
-        
+
         used
-        '''
+        """
 
         if 0 == len(face_indices_to_remove): return arange(len(self.faces))
 
@@ -740,12 +740,12 @@ class TriMesh(object):
         return old2new
 
     def append(self, mesh):
-        '''
+        """
         Given a mesh, with two properties,
             .vs, containing a list of 3d vertices
             .faces, containing a list of triangles as triplets of indices into .vs
         appends 'mesh's vertices and faces to self.vs and self.faces.
-        '''
+        """
 
         ## mesh's vertices are going to be copied to the end of self.vs;
         ## All vertex indices in mesh.faces will need to be offset by the current
@@ -785,13 +785,14 @@ class TriMesh(object):
         if self__vertex_areas is not None and mesh.__vertex_areas is not None:
             self.__vertex_areas = append(self__vertex_areas, mesh.__vertex_areas, axis=0)
 
+    @staticmethod
     def FromTriMeshes(meshes):
-        '''
+        """
         Given a sequence of meshes, each with two properties,
             .vs, containing a list of 3d vertices
             .faces, containing a list of triangles as triplets of indices into .vs
         returns a single TriMesh object containing all meshes concatenated together.
-        '''
+        """
 
         result = TriMesh()
         for mesh in meshes:
@@ -801,8 +802,7 @@ class TriMesh(object):
         result.lifetime_counter = 0
         return result
 
-    FromTriMeshes = staticmethod(FromTriMeshes)
-
+    @staticmethod
     def FromOBJ_FileName(obj_fname):
         if obj_fname.endswith('.gz'):
             import gzip
@@ -811,14 +811,13 @@ class TriMesh(object):
             f = open(obj_fname)
         return TriMesh.FromOBJ_Lines(f)
 
-    FromOBJ_FileName = staticmethod(FromOBJ_FileName)
-
+    @staticmethod
     def FromOBJ_Lines(obj_lines):
-        '''
+        """
         Given lines from an OBJ file, return a new TriMesh object.
-        
+
         tested
-        '''
+        """
 
         result = TriMesh()
 
@@ -866,17 +865,15 @@ class TriMesh(object):
 
         return result
 
-    FromOBJ_Lines = staticmethod(FromOBJ_Lines)
-
     def write_OBJ(self, fname, header_comment=None):
-        '''
+        """
         Writes the data out to an OBJ file named 'fname'.
         Optional comment 'header_comment' is printed at the
         top of the OBJ file, after prepending the OBJ comment
         marker at the head of each line.
-        
+
         tested
-        '''
+        """
 
         ## Estimate for mesh size:
         ## 16 bytes for a vertex row,
