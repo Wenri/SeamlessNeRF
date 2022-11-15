@@ -70,7 +70,7 @@ def print_hi(filepath: str | os.PathLike[str]):
     start2 = time.time()
     print("convexhull on 5D time: ", start2 - start)
     mixing_weights_1 = Get_ASAP_weights_using_Tan_2016_triangulation_and_then_barycentric_coordinates(
-        img.reshape((-1, 3))[data_hull.vertices].reshape((-1, 1, 3)), palette_rgb, "None", order=0, SAVE=True)
+        img.reshape((-1, 3))[data_hull.vertices].reshape((-1, 1, 3)), palette_rgb, "None", order=0, SAVE=False)
     mixing_weights_2 = recover_ASAP_weights_using_scipy_delaunay(
         data_hull.points[data_hull.vertices], data_hull.points, option=3)
 

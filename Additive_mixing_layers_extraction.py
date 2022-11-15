@@ -2,7 +2,9 @@
 from __future__ import print_function, division
 
 import gzip
+import io
 import json
+import logging
 import sys
 import time
 
@@ -230,8 +232,7 @@ def Hull_Simplification_determined_version(data, output_prefix, num_thres=0.1, e
     # with open( output_prefix+"-original_hull_vertices.json", 'w' ) as myfile:
     #     json.dump({'vs': (hull.points[ hull.vertices ].clip(0.0,1.0)*255).tolist(),'faces': (hull.points[ hull.simplices ].clip(0.0,1.0)*255).tolist()}, myfile, indent = 4 )
 
-    output_rawhull_obj_file = output_prefix + "-mesh_obj_files.obj"
-    write_convexhull_into_obj_file(hull, output_rawhull_obj_file)
+    write_convexhull_into_obj_file(hull, output_rawhull_obj_file := io.StringIO())
 
     if option == "unique_pixel_colors":
         unique_data, pixel_counts = get_unique_colors_and_their_counts(data.reshape((-1, 3)))
@@ -246,19 +247,19 @@ def Hull_Simplification_determined_version(data, output_prefix, num_thres=0.1, e
     for i in range(max_loop):
         if i % 10 == 0:
             print("loop: ", i)
-        mesh = TriMesh.FromOBJ_FileName(output_rawhull_obj_file)
+        mesh = TriMesh.FromOBJ_Lines(output_rawhull_obj_file.getvalue().splitlines())
         old_num = len(mesh.vs)
         old_vertices = mesh.vs
         # print ("WHY1")
         mesh = remove_one_edge_by_finding_smallest_adding_volume_with_test_conditions(mesh, option=2)
         #         newhull=ConvexHull(mesh.vs, qhull_options="Qs")
         hull = ConvexHull(mesh.vs)
-        write_convexhull_into_obj_file(hull, output_rawhull_obj_file)
+        write_convexhull_into_obj_file(hull, output_rawhull_obj_file := io.StringIO())
         # print ("WHY2")
 
         if len(hull.vertices) <= 10:
-
-            # outside_ratio=outsidehull_points_num_ratio(hull.points[ hull.vertices ].clip(0.0,1.0), data.reshape((-1,3)))
+            # outside_ratio = outsidehull_points_num_ratio(hull.points[hull.vertices].clip(0.0, 1.0),
+            #                                              data.reshape((-1, 3)))
             # if outside_ratio>num_thres:
 
             if option == "all_pixel_colors":  ### basic one.
@@ -280,27 +281,22 @@ def Hull_Simplification_determined_version(data, output_prefix, num_thres=0.1, e
 
             # print reconstruction_errors
             if reconstruction_errors > error_thres:
-
-                oldhull = ConvexHull(old_vertices)
-
-                if SAVE:
-                    name = output_prefix + "-%02d.json" % len(oldhull.vertices)
-                    with open(name, 'w') as myfile:
-                        json.dump({'vs': (oldhull.points[oldhull.vertices].clip(0.0, 1.0) * 255).tolist(),
-                                   'faces': (oldhull.points[oldhull.simplices].clip(0.0, 1.0) * 255).tolist()}, myfile,
-                                  indent=4)
-
-                return oldhull.points[oldhull.vertices].clip(0.0, 1.0)
+                hull = ConvexHull(old_vertices)
+                break
 
         if len(hull.vertices) == old_num or len(hull.vertices) == 4:
+            break
 
-            if SAVE:
-                name = output_prefix + "-%02d.json" % len(hull.vertices)
-                with open(name, 'w') as myfile:
-                    json.dump({'vs': (hull.points[hull.vertices].clip(0.0, 1.0) * 255).tolist(),
-                               'faces': (hull.points[hull.simplices].clip(0.0, 1.0) * 255).tolist()}, myfile, indent=4)
+    output_rawhull_obj_file = output_prefix + "-mesh_obj_files.obj"
+    write_convexhull_into_obj_file(hull, output_rawhull_obj_file)
 
-            return hull.points[hull.vertices].clip(0.0, 1.0)
+    if SAVE:
+        name = output_prefix + "-%02d.json" % len(hull.vertices)
+        with open(name, 'w') as myfile:
+            json.dump({'vs': (hull.points[hull.vertices].clip(0.0, 1.0) * 255).tolist(),
+                       'faces': (hull.points[hull.simplices].clip(0.0, 1.0) * 255).tolist()}, myfile, indent=4)
+
+    return hull.points[hull.vertices].clip(0.0, 1.0)
 
 
 def recover_ASAP_weights_using_scipy_delaunay(Hull_vertices, data, option=1):
@@ -444,6 +440,7 @@ def Get_ASAP_weights_using_Tan_2016_triangulation_and_then_barycentric_coordinat
             tetra_pixel_dict.setdefault(tuple((i, j, k)), [])
 
     index_list = np.array(list(np.arange(len(unique_image_label))))
+    logger = logging.getLogger(__name__)
 
     for face_vertex_ind in hull.simplices:
         if (face_vertex_ind != 0).all():
@@ -461,7 +458,7 @@ def Get_ASAP_weights_using_Tan_2016_triangulation_and_then_barycentric_coordinat
                     tetra_pixel_dict[tuple((i, j, k))] += chosen_index
                     index_list = np.array(list(set(index_list) - set(chosen_index)))
             except Exception as e:
-                pass
+                logger.warning('qhull error: %s' % e)
                 # print (tetra)
                 # print (e)
 
