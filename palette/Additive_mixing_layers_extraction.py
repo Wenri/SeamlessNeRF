@@ -340,9 +340,9 @@ def recover_ASAP_weights_using_scipy_delaunay(Hull_vertices, data, option=1):
         num_tetra = len(tri.simplices)
         all_index = np.arange(len(targets))
         for i in range(num_tetra):
-            weights_list[all_index[tetrahedra == i][:, None], np.array(tri.simplices[i])] = barycoords[
-                                                                                            all_index[tetrahedra == i],
-                                                                                            :]
+            weights_list[
+                all_index[tetrahedra == i][:, None], np.array(tri.simplices[i])
+            ] = barycoords[all_index[tetrahedra == i], :]
 
     elif option == 2:
         rows = np.repeat(np.arange(len(data)).reshape((-1, 1)), len(tri.simplices[0]), 1).ravel().tolist()
