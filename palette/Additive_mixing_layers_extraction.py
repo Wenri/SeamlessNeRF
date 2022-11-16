@@ -18,7 +18,7 @@ from scipy.spatial import ConvexHull, Delaunay
 
 from Convexhull_simplification import write_convexhull_into_obj_file, \
     remove_one_edge_by_finding_smallest_adding_volume_with_test_conditions
-from trimesh import TriMesh
+from TriMesh import TriMesh
 
 pyximport.install(reload_support=True)
 from GteDistPointTriangle import DCPPointTriangle

@@ -16,7 +16,7 @@ from scipy.spatial import ConvexHull
 # #####***********************************************************************************************
 
 # ### 3D case: use method in paper: "Progressive Hulls for Intersection Applications"
-# ### also using trimesh.py interface from yotam gingold
+# ### also using TriMesh.py interface from yotam gingold
 
 def visualize_hull(hull, groundtruth_hull=None):
     from matplotlib import pyplot as plt
@@ -139,7 +139,7 @@ def compute_tetrahedron_volume(face, point):
 # ### this is different from function: remove_one_edge_by_finding_smallest_adding_volume(mesh)
 # ### add some test conditions to accept new vertex.
 # ### if option ==1, return a new convexhull.
-# ### if option ==2, return a new mesh (using trimesh.py)
+# ### if option ==2, return a new mesh (using TriMesh.py)
 def remove_one_edge_by_finding_smallest_adding_volume_with_test_conditions(mesh, option):
     edges = mesh.get_edges()
     mesh.get_halfedges()
@@ -311,7 +311,7 @@ def remove_one_edge_by_finding_smallest_adding_volume_with_test_conditions(mesh,
 ############### using original image as input###############
 
 def main():
-    from trimesh import TriMesh
+    from TriMesh import TriMesh
 
     input_image_path = sys.argv[1] + ".png"
     output_rawhull_obj_file = sys.argv[1] + "-rawconvexhull.obj"
