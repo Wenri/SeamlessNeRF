@@ -1,7 +1,6 @@
-
 dataset_name = blender
 datadir = ../nerf-pytorch/data/nerf_synthetic/lego
-expname =  tensorf_lego_VM
+expname = tensorf_lego_VM
 basedir = ./log
 
 n_iters = 30000
@@ -19,10 +18,10 @@ render_test = 1
 
 n_lamb_sigma = [16,16,16]
 n_lamb_sh = [48,48,48]
-model_name = TensorVMSplit
+model_name = ColorVMSplit
 
 
-shadingMode = MLP_Fea
+shadingMode = PLT_Fea
 fea2denseAct = softplus
 
 view_pe = 2

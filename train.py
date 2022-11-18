@@ -8,9 +8,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from dataLoader import dataset_dict
-from models.tensoRF import TensorVM, TensorCP, TensorVMSplit
-from models.tensorBase import AlphaGridMask
-from opt import config_parser
+from opt import config_parser, MODEL_ZOO
 from renderer import OctreeRender_trilinear_fast, evaluation, evaluation_path
 from utils import convert_sdf_samples_to_ply, N_to_reso, cal_n_samples, TVLoss
 
@@ -31,8 +29,6 @@ class SimpleSampler:
 
 
 class Trainer:
-    MODEL_ZOO = {a.__name__: a for a in (TensorVM, TensorCP, TensorVMSplit, AlphaGridMask)}
-
     def __init__(self):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.renderer = OctreeRender_trilinear_fast
@@ -42,7 +38,7 @@ class Trainer:
         ckpt = torch.load(args.ckpt, map_location=self.device)
         kwargs = ckpt['kwargs']
         kwargs.update({'device': self.device})
-        tensorf = self.MODEL_ZOO[args.model_name](**kwargs)
+        tensorf = MODEL_ZOO[args.model_name](**kwargs)
         tensorf.load(ckpt)
 
         alpha, _ = tensorf.getDenseAlpha()
@@ -63,7 +59,7 @@ class Trainer:
         ckpt = torch.load(args.ckpt, map_location=self.device)
         kwargs = ckpt['kwargs']
         kwargs.update({'device': self.device})
-        tensorf = self.MODEL_ZOO[args.model_name](**kwargs)
+        tensorf = MODEL_ZOO[args.model_name](**kwargs)
         tensorf.load(ckpt)
 
         logfolder = os.path.dirname(args.ckpt)
@@ -122,10 +118,10 @@ class Trainer:
             ckpt = torch.load(args.ckpt, map_location=self.device)
             kwargs = ckpt['kwargs']
             kwargs.update({'device': self.device})
-            tensorf = self.MODEL_ZOO[args.model_name](**kwargs)
+            tensorf = MODEL_ZOO[args.model_name](**kwargs)
             tensorf.load(ckpt)
         else:
-            tensorf = self.MODEL_ZOO[args.model_name](
+            tensorf = MODEL_ZOO[args.model_name](
                 aabb, reso_cur, self.device,
                 density_n_comp=n_lamb_sigma, appearance_n_comp=n_lamb_sh,
                 app_dim=args.data_dim_color, near_far=near_far,

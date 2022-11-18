@@ -45,7 +45,7 @@ def get_bigger_palette_to_show(palette):
     return palette2
 
 
-def print_hi(filepath: str | os.PathLike[str]):
+def main(filepath: str | os.PathLike[str]):
     filepath = Path(filepath)
     img = np.asfarray(Image.open(filepath).convert('RGB')) / 255.0
     arr = img.copy()
@@ -87,4 +87,4 @@ def print_hi(filepath: str | os.PathLike[str]):
 
 
 if __name__ == '__main__':
-    print_hi('../nerf-pytorch/data/nerf_llff_data/fern/images/IMG_4026.JPG')
+    main('../nerf-pytorch/data/nerf_llff_data/fern/images/IMG_4026.JPG')
