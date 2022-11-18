@@ -8,7 +8,8 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from dataLoader import dataset_dict
-from opt import config_parser, MODEL_ZOO
+from models import MODEL_ZOO
+from opt import config_parser
 from renderer import OctreeRender_trilinear_fast, evaluation, evaluation_path
 from utils import convert_sdf_samples_to_ply, N_to_reso, cal_n_samples, TVLoss
 
