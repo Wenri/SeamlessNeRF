@@ -4,7 +4,7 @@ from .tensorBase import positional_encoding
 
 
 class PLTRender(torch.nn.Module):
-    def __init__(self, inChanel, viewpe=6, feape=6, featureC=128):
+    def __init__(self, inChanel, viewpe=6, feape=6, featureC=128, palette=None):
         super().__init__()
 
         self.in_mlpC = 2 * viewpe * 3 + 2 * feape * inChanel + 3 + inChanel
@@ -13,6 +13,7 @@ class PLTRender(torch.nn.Module):
         layer1 = torch.nn.Linear(self.in_mlpC, featureC)
         layer2 = torch.nn.Linear(featureC, featureC)
         layer3 = torch.nn.Linear(featureC, 3)
+        self.register_buffer('palette', torch.as_tensor(palette, dtype=torch.float32), persistent=False)
 
         self.mlp = torch.nn.Sequential(layer1, torch.nn.ReLU(inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
         torch.nn.init.constant_(self.mlp[-1].bias, 0)

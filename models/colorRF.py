@@ -3,9 +3,10 @@ from .tensoRF import TensorVMSplit
 
 
 class ColorVMSplit(TensorVMSplit):
-    def init_render_func(self):
-        match self.shadingMode:
+    def init_render_func(self, shadingMode='PLT_Fea', pos_pe=6, view_pe=6, fea_pe=6, featureC=128, palette=None,
+                         **kwargs):
+        match shadingMode:
             case 'PLT_Fea':
-                return PLTRender(self.app_dim, self.view_pe, self.fea_pe, self.featureC).to(self.device)
+                return PLTRender(self.app_dim, view_pe, fea_pe, featureC, palette).to(self.device)
             case _:
-                return super(ColorVMSplit, self).init_render_func()
+                return super().init_render_func(shadingMode, pos_pe, view_pe, fea_pe, featureC, **kwargs)

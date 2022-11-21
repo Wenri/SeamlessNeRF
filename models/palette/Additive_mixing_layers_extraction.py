@@ -16,12 +16,12 @@ import scipy.optimize
 import scipy.sparse
 from scipy.spatial import ConvexHull, Delaunay
 
-from Convexhull_simplification import write_convexhull_into_obj_file, \
+from .Convexhull_simplification import write_convexhull_into_obj_file, \
     remove_one_edge_by_finding_smallest_adding_volume_with_test_conditions
-from TriMesh import TriMesh
+from .TriMesh import TriMesh
 
 pyximport.install(reload_support=True)
-from GteDistPointTriangle import DCPPointTriangle
+from .GteDistPointTriangle import DCPPointTriangle
 
 
 def Convert_scipy_convexhull_face_ind_to_basic_face_ind(hull):

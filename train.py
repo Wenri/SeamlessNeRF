@@ -1,6 +1,7 @@
 import os
 import sys
 from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -83,14 +84,16 @@ class Trainer:
             evaluation_path(test_dataset, tensorf, c2ws, self.renderer, f'{logfolder}/{args.expname}/imgs_path_all/',
                             N_vis=-1, N_samples=-1, white_bg=white_bg, ndc_ray=ndc_ray, device=self.device)
 
-    def build_palette(self, dataset):
+    def build_palette(self, dataset, filepath):
+        filepath = Path(filepath)
         rgbs = dataset.all_rgbs
         if dataset.white_bg:
             fg = torch.lt(rgbs, 1.).any(dim=-1)
             rgbs = rgbs[fg]
         palette_rgb = Hull_Simplification_determined_version(
-            rgbs, filepath.stem + "-convexhull_vertices", error_thres=1. / 256.)
-        return torch.from_numpy(palette_rgb).to(self.device)
+            rgbs.to(device='cpu', dtype=torch.double).numpy(),
+            filepath.stem + "-convexhull_vertices", error_thres=1. / 256.)
+        return [tuple(a) for a in palette_rgb.tolist()]
 
     def reconstruction(self, args):
         # init dataset
@@ -100,7 +103,6 @@ class Trainer:
         white_bg = train_dataset.white_bg
         near_far = train_dataset.near_far
         ndc_ray = args.ndc_ray
-        palette = self.build_palette(train_dataset)
 
         # init resolution
         upsamp_list = args.upsamp_list
@@ -133,6 +135,7 @@ class Trainer:
             tensorf = MODEL_ZOO[args.model_name](**kwargs)
             tensorf.load(ckpt)
         else:
+            palette = self.build_palette(train_dataset, args.datadir)
             tensorf = MODEL_ZOO[args.model_name](
                 aabb, reso_cur, self.device,
                 density_n_comp=n_lamb_sigma, appearance_n_comp=n_lamb_sh,
@@ -141,7 +144,7 @@ class Trainer:
                 density_shift=args.density_shift, distance_scale=args.distance_scale,
                 pos_pe=args.pos_pe, view_pe=args.view_pe, fea_pe=args.fea_pe,
                 featureC=args.featureC, step_ratio=args.step_ratio,
-                fea2denseAct=args.fea2denseAct)
+                fea2denseAct=args.fea2denseAct, palette=palette)
 
         grad_vars = tensorf.get_optparam_groups(args.lr_init, args.lr_basis)
         if args.lr_decay_iters > 0:

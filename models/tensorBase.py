@@ -140,11 +140,9 @@ class MLPRender(torch.nn.Module):
 
 
 class TensorBase(torch.nn.Module):
-    def __init__(self, aabb, gridSize, device, density_n_comp=8, appearance_n_comp=24, app_dim=27,
-                 shadingMode='MLP_PE', alphaMask=None, near_far=[2.0, 6.0],
-                 density_shift=-10, alphaMask_thres=0.001, distance_scale=25, rayMarch_weight_thres=0.0001,
-                 pos_pe=6, view_pe=6, fea_pe=6, featureC=128, step_ratio=2.0,
-                 fea2denseAct='softplus'):
+    def __init__(self, aabb, gridSize, device, density_n_comp=8, appearance_n_comp=24, app_dim=27, alphaMask=None,
+                 near_far=(2.0, 6.0), density_shift=-10, alphaMask_thres=0.001, distance_scale=25,
+                 rayMarch_weight_thres=0.0001, step_ratio=2.0, fea2denseAct='softplus', **kwargs):
         super(TensorBase, self).__init__()
 
         self.density_n_comp = density_n_comp
@@ -171,20 +169,19 @@ class TensorBase(torch.nn.Module):
 
         self.init_svd_volume(gridSize[0], device)
 
-        print("pos_pe", pos_pe, "view_pe", view_pe, "fea_pe", fea_pe)
-        self.pos_pe, self.view_pe, self.fea_pe, self.featureC = pos_pe, view_pe, fea_pe, featureC
-        self.shadingMode = shadingMode
-        self.renderModule = self.init_render_func()
+        self.shadingMode = kwargs
+        self.renderModule = self.init_render_func(**kwargs)
         print(self.renderModule)
 
-    def init_render_func(self):
-        match self.shadingMode:
+    def init_render_func(self, shadingMode='MLP_PE', pos_pe=6, view_pe=6, fea_pe=6, featureC=128, **kwargs):
+        print("pos_pe", pos_pe, "view_pe", view_pe, "fea_pe", fea_pe)
+        match shadingMode:
             case 'MLP_PE':
-                ret = MLPRender_PE(self.app_dim, self.view_pe, self.pos_pe, self.featureC).to(self.device)
+                ret = MLPRender_PE(self.app_dim, view_pe, pos_pe, featureC).to(self.device)
             case 'MLP_Fea':
-                ret = MLPRender_Fea(self.app_dim, self.view_pe, self.fea_pe, self.featureC).to(self.device)
+                ret = MLPRender_Fea(self.app_dim, view_pe, fea_pe, featureC).to(self.device)
             case 'MLP':
-                ret = MLPRender(self.app_dim, self.view_pe, self.featureC).to(self.device)
+                ret = MLPRender(self.app_dim, view_pe, featureC).to(self.device)
             case 'SH':
                 ret = SHRender
             case 'RGB':
@@ -242,11 +239,7 @@ class TensorBase(torch.nn.Module):
             'near_far': self.near_far,
             'step_ratio': self.step_ratio,
 
-            'shadingMode': self.shadingMode,
-            'pos_pe': self.pos_pe,
-            'view_pe': self.view_pe,
-            'fea_pe': self.fea_pe,
-            'featureC': self.featureC
+            **self.shadingMode
         }
 
     def save(self, path):
