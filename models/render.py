@@ -12,11 +12,13 @@ class PLTRender(torch.nn.Module):
         self.feape = feape
         layer1 = torch.nn.Linear(self.in_mlpC, featureC)
         layer2 = torch.nn.Linear(featureC, featureC)
-        layer3 = torch.nn.Linear(featureC, 3)
+        layer3 = torch.nn.Linear(featureC, len(palette))
+        torch.nn.init.constant_(layer3.bias, 0)
         self.register_buffer('palette', torch.as_tensor(palette, dtype=torch.float32), persistent=False)
 
-        self.mlp = torch.nn.Sequential(layer1, torch.nn.ReLU(inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
-        torch.nn.init.constant_(self.mlp[-1].bias, 0)
+        self.mlp = torch.nn.Sequential(layer1, torch.nn.ReLU(inplace=True),
+                                       layer2, torch.nn.ReLU(inplace=True),
+                                       layer3, torch.nn.Softplus())
 
     def forward(self, pts, viewdirs, features):
         indata = [features, viewdirs]
@@ -25,7 +27,6 @@ class PLTRender(torch.nn.Module):
         if self.viewpe > 0:
             indata += [positional_encoding(viewdirs, self.viewpe)]
         mlp_in = torch.cat(indata, dim=-1)
-        rgb = self.mlp(mlp_in)
-        rgb = torch.sigmoid(rgb)
+        rgb = self.mlp(mlp_in) @ self.palette
 
         return rgb
