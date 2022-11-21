@@ -437,7 +437,7 @@ class TensorBase(torch.nn.Module):
             sigma_feature = self.compute_densityfeature(xyz_sampled[ray_valid])
 
             validsigma = self.feature2density(sigma_feature)
-            sigma[ray_valid] = validsigma
+            sigma.masked_scatter_(ray_valid, validsigma)
 
         alpha, weight, bg_weight = raw2alpha(sigma, dists * self.distance_scale)
 

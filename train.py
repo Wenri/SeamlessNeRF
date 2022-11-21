@@ -9,6 +9,7 @@ from tqdm import tqdm
 
 from dataLoader import dataset_dict
 from models import MODEL_ZOO
+from models.palette.Additive_mixing_layers_extraction import Hull_Simplification_determined_version
 from opt import config_parser
 from renderer import OctreeRender_trilinear_fast, evaluation, evaluation_path
 from utils import convert_sdf_samples_to_ply, N_to_reso, cal_n_samples, TVLoss
@@ -82,6 +83,15 @@ class Trainer:
             evaluation_path(test_dataset, tensorf, c2ws, self.renderer, f'{logfolder}/{args.expname}/imgs_path_all/',
                             N_vis=-1, N_samples=-1, white_bg=white_bg, ndc_ray=ndc_ray, device=self.device)
 
+    def build_palette(self, dataset):
+        rgbs = dataset.all_rgbs
+        if dataset.white_bg:
+            fg = torch.lt(rgbs, 1.).any(dim=-1)
+            rgbs = rgbs[fg]
+        palette_rgb = Hull_Simplification_determined_version(
+            rgbs, filepath.stem + "-convexhull_vertices", error_thres=1. / 256.)
+        return torch.from_numpy(palette_rgb).to(self.device)
+
     def reconstruction(self, args):
         # init dataset
         dataset = dataset_dict[args.dataset_name]
@@ -90,6 +100,7 @@ class Trainer:
         white_bg = train_dataset.white_bg
         near_far = train_dataset.near_far
         ndc_ray = args.ndc_ray
+        palette = self.build_palette(train_dataset)
 
         # init resolution
         upsamp_list = args.upsamp_list
