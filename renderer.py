@@ -1,7 +1,8 @@
-import imageio
-import numpy as np
 import os
 import sys
+
+import imageio
+import numpy as np
 import torch
 from tqdm.auto import tqdm
 
@@ -49,7 +50,7 @@ def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, pr
 
         rgb_map, _, depth_map, _, _ = renderer(rays, tensorf, chunk=4096, N_samples=N_samples,
                                                ndc_ray=ndc_ray, white_bg=white_bg, device=device)
-        rgb_map = rgb_map.clamp(0.0, 1.0)
+        rgb_map = rgb_map[..., :3].clamp(0.0, 1.0)
 
         rgb_map, depth_map = rgb_map.reshape(H, W, 3).cpu(), depth_map.reshape(H, W).cpu()
 
@@ -118,7 +119,7 @@ def evaluation_path(test_dataset, tensorf, c2ws, renderer, savePath=None, N_vis=
 
         rgb_map, _, depth_map, _, _ = renderer(rays, tensorf, chunk=8192, N_samples=N_samples,
                                                ndc_ray=ndc_ray, white_bg=white_bg, device=device)
-        rgb_map = rgb_map.clamp(0.0, 1.0)
+        rgb_map = rgb_map[..., :3].clamp(0.0, 1.0)
 
         rgb_map, depth_map = rgb_map.reshape(H, W, 3).cpu(), depth_map.reshape(H, W).cpu()
 
