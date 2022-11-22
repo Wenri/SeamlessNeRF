@@ -23,15 +23,15 @@ class PLTRender(torch.nn.Module):
                                        layer2, torch.nn.LeakyReLU(inplace=True),
                                        layer3)
 
-    def rgb_from_palette(self, logits, opaque):
-        log_csum = torch.cumsum(F.logsigmoid(torch.neg(logits)), dim=-1)
-        log_w0 = log_csum[..., -1:None]
-        w_0 = torch.exp(log_w0)
-        w_a = torch.exp(log_w0 - log_csum[..., :-1]) * opaque[..., :-1]
-        w_last = opaque[..., -1:None]
+    def rgb_from_palette_rev(self, logits):
+        opaque = F.sigmoid(logits)
+        w_0 = opaque[..., :1]
+        w_a = torch.exp(torch.cumsum(F.logsigmoid(torch.neg(logits)), dim=-1))
+        w_last = w_a[..., -1:]
+        w_a = w_a[..., :-1] * opaque[..., 1:]
         bary_coord = torch.cat((w_0, w_a, w_last), dim=-1)
-        # assert torch.allclose(bary_coord.sum(dim=-1), torch.ones(()), atol=1e-3, rtol=1e-3)
-        return bary_coord @ self.palette
+        # bary_coord guarantee sum .eq. 1 # assert torch.allclose(bary_coord.sum(dim=-1), torch.ones(()), atol=1e-3)
+        return bary_coord @ self.palette, opaque
 
     def forward(self, pts, viewdirs, features):
         indata = [features, viewdirs]
@@ -40,7 +40,5 @@ class PLTRender(torch.nn.Module):
         if self.viewpe > 0:
             indata.append(positional_encoding(viewdirs, self.viewpe))
         logits = self.mlp(torch.cat(indata, dim=-1))
-        opaque = F.sigmoid(logits)
-        rgb = self.rgb_from_palette(logits, opaque)
-
+        rgb, opaque = self.rgb_from_palette_rev(logits)
         return torch.cat((rgb, opaque), dim=-1)
