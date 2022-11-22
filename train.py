@@ -191,10 +191,12 @@ class Trainer:
                 rays_train, tensorf, chunk=args.batch_size, N_samples=nSamples, white_bg=white_bg,
                 ndc_ray=ndc_ray, device=self.device, is_train=True)
 
-            loss = torch.mean((rgb_map - rgb_train) ** 2)
+            rgb_map, opaque = rgb_map[..., :3], rgb_map[..., 3:]
+            E_opaque = torch.mean(torch.square(rgb_map))
+            loss = torch.mean(torch.square(rgb_map - rgb_train))
 
             # loss
-            total_loss = loss
+            total_loss = loss - E_opaque / 375
             if Ortho_reg_weight > 0:
                 loss_reg = tensorf.vector_comp_diffs()
                 total_loss += Ortho_reg_weight * loss_reg

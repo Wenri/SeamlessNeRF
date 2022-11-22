@@ -171,6 +171,7 @@ class TensorBase(torch.nn.Module):
 
         self.shadingMode = kwargs
         self.renderModule = self.init_render_func(**kwargs)
+        self.n_dim = getattr(self.renderModule, 'n_dim', 3)
         print(self.renderModule)
 
     def init_render_func(self, shadingMode='MLP_PE', pos_pe=6, view_pe=6, fea_pe=6, featureC=128, **kwargs):
@@ -423,7 +424,7 @@ class TensorBase(torch.nn.Module):
             ray_valid = ~ray_invalid
 
         sigma = torch.zeros(xyz_sampled.shape[:-1], device=xyz_sampled.device)
-        rgb = torch.zeros((*xyz_sampled.shape[:2], 3), device=xyz_sampled.device)
+        rgb = torch.zeros((*xyz_sampled.shape[:2], self.n_dim), device=xyz_sampled.device)
 
         if ray_valid.any():
             xyz_sampled = self.normalize_coord(xyz_sampled)
