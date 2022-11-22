@@ -13,7 +13,7 @@ class PLTRender(torch.nn.Module):
         self.n_palette = len(palette)
         layer1 = torch.nn.Linear(self.in_mlpC, featureC)
         layer2 = torch.nn.Linear(featureC, featureC)
-        layer3 = torch.nn.Linear(featureC, self.n_palette)
+        layer3 = torch.nn.Linear(featureC, self.n_palette - 1)
         torch.nn.init.constant_(layer3.bias, 0)
         self.register_buffer('palette', torch.as_tensor(palette, dtype=torch.float32), persistent=False)
 
@@ -29,7 +29,14 @@ class PLTRender(torch.nn.Module):
             indata += [positional_encoding(viewdirs, self.viewpe)]
         mlp_in = torch.cat(indata, dim=-1)
         log_alpha = self.mlp(mlp_in)
-        bary_coord = torch.cumsum(log_alpha, dim=-1)
+        wlast = 1 - torch.exp(log_alpha[..., -1:None])
+        log_alpha = torch.cumsum(log_alpha, dim=-1)
+        log_w0 = log_alpha[..., -1:None]
+        log_alpha_a = log_w0 - log_alpha[..., :-1]
+        log_alpha_b = log_w0 - log_alpha[..., :-2]
+        log_alpha_b = torch.concat((log_w0, log_alpha_b), dim=-1)
+        bary_coord = (torch.exp(log_w0), torch.exp(log_alpha_a) - torch.exp(log_alpha_b), wlast)
+        bary_coord = torch.cat(bary_coord, dim=-1)
         rgb = bary_coord @ self.palette
 
         return rgb
