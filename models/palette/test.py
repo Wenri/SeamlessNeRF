@@ -7,7 +7,7 @@ import numpy as np
 from PIL import Image
 from scipy.spatial import ConvexHull
 
-from Additive_mixing_layers_extraction import Hull_Simplification_determined_version, \
+from .Additive_mixing_layers_extraction import Hull_Simplification_determined_version, \
     Get_ASAP_weights_using_Tan_2016_triangulation_and_then_barycentric_coordinates, \
     recover_ASAP_weights_using_scipy_delaunay
 
