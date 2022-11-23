@@ -191,8 +191,8 @@ class Trainer:
                 rays_train, tensorf, chunk=args.batch_size, N_samples=nSamples, white_bg=white_bg,
                 ndc_ray=ndc_ray, device=self.device, is_train=True)
 
-            rgb_map, E_opaque = rgb_map[..., :3], 1 - rgb_map[..., 3:]
-            E_opaque = torch.mean(torch.square(E_opaque))
+            rgb_map, E_opaque = rgb_map[..., :3], rgb_map[..., 3:]
+            E_opaque = torch.mean(torch.square(1. - E_opaque))
             loss = torch.mean(torch.square(rgb_map - rgb_train))
 
             # loss
