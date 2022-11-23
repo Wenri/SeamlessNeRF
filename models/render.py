@@ -25,12 +25,14 @@ class PLTRender(torch.nn.Module):
 
     def rgb_from_palette_rev(self, logits):
         opaque = F.sigmoid(logits)
+        log_opq = F.logsigmoid(logits)
+        log_wa = torch.cumsum(F.logsigmoid(torch.neg(logits)), dim=-1)
         w_0 = opaque[..., :1]
-        w_a = torch.exp(torch.cumsum(F.logsigmoid(torch.neg(logits)), dim=-1))
-        w_last = w_a[..., -1:]
-        w_a = w_a[..., :-1] * opaque[..., 1:]
+        w_a = torch.exp(log_wa[..., :-1] + log_opq[..., 1:])
+        w_last = torch.exp(log_wa[..., -1:])
         bary_coord = torch.cat((w_0, w_a, w_last), dim=-1)
-        # bary_coord guarantee sum .eq. 1 # assert torch.allclose(bary_coord.sum(dim=-1), torch.ones(()), atol=1e-3)
+        # bary_coord guarantee sum .eq. 1
+        # assert torch.allclose(bary_coord.sum(dim=-1), torch.ones(()), atol=1e-3)
         return bary_coord @ self.palette, opaque
 
     def forward(self, pts, viewdirs, features):
