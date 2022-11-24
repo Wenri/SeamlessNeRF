@@ -33,7 +33,7 @@ def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, pr
     PSNRs, rgb_maps, depth_maps = [], [], []
     ssims, l_alex, l_vgg = [], [], []
     os.makedirs(savePath, exist_ok=True)
-    os.makedirs(savePath + "/rgbd", exist_ok=True)
+    os.makedirs(os.path.join(savePath, "rgbd"), exist_ok=True)
 
     try:
         tqdm._instances.clear()
@@ -99,7 +99,7 @@ def evaluation_path(test_dataset, tensorf, c2ws, renderer, savePath=None, N_vis=
     PSNRs, rgb_maps, depth_maps = [], [], []
     ssims, l_alex, l_vgg = [], [], []
     os.makedirs(savePath, exist_ok=True)
-    os.makedirs(savePath + "/rgbd", exist_ok=True)
+    os.makedirs(os.path.join(savePath, "rgbd"), exist_ok=True)
 
     try:
         tqdm._instances.clear()
