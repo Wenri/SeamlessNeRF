@@ -445,8 +445,8 @@ class TensorBase(torch.nn.Module):
         acc_map = torch.sum(weight, -1)
         rgb_map = torch.sum(weight[..., None] * rgb, -2)
 
-        if white_bg or (is_train and torch.rand((1,)) < 0.5):
-            rgb_map = rgb_map + (1. - acc_map[..., None])
+        if white_bg:  # or (is_train and torch.rand(()) < 0.5):
+            rgb_map[..., :3] += 1. - acc_map[..., None]
 
         rgb_map = rgb_map.clamp(0, 1)
 

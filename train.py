@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from einops import rearrange
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
@@ -93,7 +94,18 @@ class Trainer:
         palette_rgb = Hull_Simplification_determined_version(
             rgbs.to(device='cpu', dtype=torch.double).numpy(),
             filepath.stem + "-convexhull_vertices", error_thres=1. / 256.)
-        return [tuple(a) for a in palette_rgb.tolist()]
+
+        dist = rearrange(rgbs, 'N C -> N 1 C') - rearrange(torch.from_numpy(palette_rgb).to(rgbs.device),
+                                                           'P C -> 1 P C')
+        dist = torch.linalg.vector_norm(dist, dim=-1)
+        dist = torch.argmin(dist, dim=-1)
+        dist = torch.argsort(torch.bincount(dist))
+
+        # bg = np.ones(3) if dataset.white_bg else np.zeros(3)
+        # palette_rgb = [tuple(a.tolist()) for a in palette_rgb[dist.cpu().numpy()] if not np.allclose(a, bg)]
+        # palette_rgb.append(tuple(bg.tolist()))
+        palette_rgb = [tuple(a) for a in palette_rgb[dist.cpu().numpy()].tolist()]
+        return palette_rgb
 
     def reconstruction(self, args):
         # init dataset

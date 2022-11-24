@@ -24,7 +24,7 @@ class PLTRender(torch.nn.Module):
                                        layer3)
 
     def rgb_from_palette_rev(self, logits):
-        opaque = F.sigmoid(logits)
+        opaque = torch.sigmoid(logits)
         log_opq = F.logsigmoid(logits)
         log_wa = torch.cumsum(F.logsigmoid(torch.neg(logits)), dim=-1)
         w_0 = opaque[..., :1]
