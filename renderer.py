@@ -1,9 +1,11 @@
 import os
 import sys
+from pathlib import Path
 
 import imageio
 import numpy as np
 import torch
+from einops import rearrange
 from tqdm.auto import tqdm
 
 from dataLoader.ray_utils import get_rays
@@ -34,6 +36,9 @@ def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, pr
     ssims, l_alex, l_vgg = [], [], []
     os.makedirs(savePath, exist_ok=True)
     os.makedirs(os.path.join(savePath, "rgbd"), exist_ok=True)
+    os.makedirs(os.path.join(savePath, "palette"), exist_ok=True)
+    savePath = Path(savePath)
+    palette = getattr(tensorf.renderModule, 'palette')
 
     try:
         tqdm._instances.clear()
@@ -50,8 +55,10 @@ def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, pr
 
         rgb_map, _, depth_map, _, _ = renderer(rays, tensorf, chunk=4096, N_samples=N_samples,
                                                ndc_ray=ndc_ray, white_bg=white_bg, device=device)
+        opaque = rgb_map[..., 3:]
         rgb_map = rgb_map[..., :3].clamp(0.0, 1.0)
 
+        opaque = rearrange(opaque, '(h w) c-> h w c', h=H, w=W)
         rgb_map, depth_map = rgb_map.reshape(H, W, 3).cpu(), depth_map.reshape(H, W).cpu()
 
         depth_map, _ = visualize_depth_numpy(depth_map.numpy(), near_far)
@@ -68,17 +75,21 @@ def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, pr
                 l_alex.append(l_a)
                 l_vgg.append(l_v)
 
+        opaque = opaque[..., None] * palette[:5]
         rgb_map = (rgb_map.numpy() * 255).astype('uint8')
         # rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
         rgb_maps.append(rgb_map)
         depth_maps.append(depth_map)
         if savePath is not None:
-            imageio.imwrite(f'{savePath}/{prtx}{idx:03d}.png', rgb_map)
+            imageio.imwrite(savePath / f'{prtx}{idx:03d}.png', rgb_map)
             rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
-            imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.png', rgb_map)
+            imageio.imwrite(savePath / 'rgbd' / f'{prtx}{idx:03d}.png', rgb_map)
+            for j, opq_map in enumerate(torch.split(opaque, 1, dim=2)):
+                opq_map = (opq_map.cpu().squeeze(dim=2).numpy() * 255).astype('uint8')
+                imageio.imwrite(savePath / 'palette' / f'{prtx}{idx:03d}_{j}.png', opq_map)
 
-    imageio.mimwrite(f'{savePath}/{prtx}video.mp4', np.stack(rgb_maps), fps=30, quality=10)
-    imageio.mimwrite(f'{savePath}/{prtx}depthvideo.mp4', np.stack(depth_maps), fps=30, quality=10)
+    imageio.mimwrite(savePath / f'{prtx}video.mp4', np.stack(rgb_maps), fps=len(rgb_maps), quality=10)
+    imageio.mimwrite(savePath / f'{prtx}depthvideo.mp4', np.stack(depth_maps), fps=len(depth_maps), quality=10)
 
     if PSNRs:
         psnr = np.mean(np.asarray(PSNRs))
@@ -86,9 +97,9 @@ def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, pr
             ssim = np.mean(np.asarray(ssims))
             l_a = np.mean(np.asarray(l_alex))
             l_v = np.mean(np.asarray(l_vgg))
-            np.savetxt(f'{savePath}/{prtx}mean.txt', np.asarray([psnr, ssim, l_a, l_v]))
+            np.savetxt(savePath / f'{prtx}mean.txt', np.asarray([psnr, ssim, l_a, l_v]))
         else:
-            np.savetxt(f'{savePath}/{prtx}mean.txt', np.asarray([psnr]))
+            np.savetxt(savePath / f'{prtx}mean.txt', np.asarray([psnr]))
 
     return PSNRs
 
