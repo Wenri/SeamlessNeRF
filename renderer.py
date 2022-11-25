@@ -88,8 +88,9 @@ def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, pr
                 opq_map = (opq_map.cpu().squeeze(dim=2).numpy() * 255).astype('uint8')
                 imageio.imwrite(savePath / 'palette' / f'{prtx}{idx:03d}_{j}.png', opq_map)
 
-    imageio.mimwrite(savePath / f'{prtx}video.mp4', np.stack(rgb_maps), fps=len(rgb_maps), quality=10)
-    imageio.mimwrite(savePath / f'{prtx}depthvideo.mp4', np.stack(depth_maps), fps=len(depth_maps), quality=10)
+    fps = min(len(rgb_maps) / 5, 30)
+    imageio.mimwrite(savePath / f'{prtx}video.mp4', np.stack(rgb_maps), fps=fps, quality=10)
+    imageio.mimwrite(savePath / f'{prtx}depthvideo.mp4', np.stack(depth_maps), fps=fps, quality=10)
 
     if PSNRs:
         psnr = np.mean(np.asarray(PSNRs))
@@ -145,8 +146,9 @@ def evaluation_path(test_dataset, tensorf, c2ws, renderer, savePath=None, N_vis=
             rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
             imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.png', rgb_map)
 
-    imageio.mimwrite(f'{savePath}/{prtx}video.mp4', np.stack(rgb_maps), fps=30, quality=8)
-    imageio.mimwrite(f'{savePath}/{prtx}depthvideo.mp4', np.stack(depth_maps), fps=30, quality=8)
+    fps = min(len(rgb_maps) / 5, 30)
+    imageio.mimwrite(f'{savePath}/{prtx}video.mp4', np.stack(rgb_maps), fps=fps, quality=8)
+    imageio.mimwrite(f'{savePath}/{prtx}depthvideo.mp4', np.stack(depth_maps), fps=fps, quality=8)
 
     if PSNRs:
         psnr = np.mean(np.asarray(PSNRs))
