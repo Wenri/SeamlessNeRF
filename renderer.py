@@ -10,7 +10,8 @@ from tqdm.auto import tqdm
 
 from dataLoader.ray_utils import get_rays
 from dataLoader.ray_utils import ndc_rays_blender
-from utils import visualize_depth_numpy, rgb_ssim, rgb_lpips
+from extra.compute_metrics import rgb_ssim, rgb_lpips
+from utils import visualize_depth_numpy
 
 
 def OctreeRender_trilinear_fast(rays, tensorf, chunk=4096, N_samples=-1, ndc_ray=False, white_bg=True, is_train=False,

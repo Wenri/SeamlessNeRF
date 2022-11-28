@@ -1,22 +1,26 @@
 import os
-import threading, queue
-import numpy as np
+import queue
+import threading
 import time
+
+import numpy as np
 
 
 def getFolderLocker(logFolder):
     while True:
         try:
-            os.makedirs(logFolder+"/lockFolder")
+            os.makedirs(logFolder + "/lockFolder")
             break
-        except: 
+        except:
             time.sleep(0.01)
 
+
 def releaseFolderLocker(logFolder):
-    os.removedirs(logFolder+"/lockFolder")
+    os.removedirs(logFolder + "/lockFolder")
+
 
 def getStopFolder(logFolder):
-    return os.path.isdir(logFolder+"/stopFolder")
+    return os.path.isdir(logFolder + "/stopFolder")
 
 
 def get_param_str(key, val):
@@ -25,22 +29,23 @@ def get_param_str(key, val):
     else:
         return f'--{key} {val} '
 
+
 def get_param_list(param_dict):
     param_keys = list(param_dict.keys())
     param_modes = len(param_keys)
     param_nums = [len(param_dict[key]) for key in param_keys]
-    
-    param_ids = np.zeros(param_nums+[param_modes], dtype=int)
+
+    param_ids = np.zeros(param_nums + [param_modes], dtype=int)
     for i in range(param_modes):
         broad_tuple = np.ones(param_modes, dtype=int).tolist()
         broad_tuple[i] = param_nums[i]
         broad_tuple = tuple(broad_tuple)
         print(broad_tuple)
-        param_ids[...,i] = np.arange(param_nums[i]).reshape(broad_tuple)
+        param_ids[..., i] = np.arange(param_nums[i]).reshape(broad_tuple)
     param_ids = param_ids.reshape(-1, param_modes)
     # print(param_ids)
     print(len(param_ids))
-    
+
     params = []
     expnames = []
     for i in range(param_ids.shape[0]):
@@ -55,31 +60,22 @@ def get_param_list(param_dict):
                 for k in range(len(key)):
                     one += get_param_str(key[k], val[k])
                     name += f'{val[k]},'
-                name=name[:-1]+'-'
+                name = name[:-1] + '-'
             else:
                 one += get_param_str(key, val)
                 name += f'{val}-'
         params.append(one)
-        name=name.replace(' ','')
+        name = name.replace(' ', '')
         print(name)
         expnames.append(name[:-1])
     # print(params)
     return params, expnames
 
 
-
-
-
-
-
-if __name__ == '__main__':
-    
-
-
+def main():
     # nerf
     expFolder = "nerf/"
     # parameters to iterate, use tuple to couple multiple parameters
-    datafolder = '/mnt/new_disk_2/anpei/Dataset/nerf_synthetic/'
     param_dict = {
         'data_name': ['ship', 'mic', 'chair', 'lego', 'drums', 'ficus', 'hotdog', 'materials'],
         'data_dim_color': [13, 27, 54]
@@ -157,26 +153,25 @@ if __name__ == '__main__':
     #             ('upsamp_list','update_AlphaMask_list'): [("[2000,3000,4000,5500,7000]","[2500]")],
     #     }
 
-    #setting available gpus
+    # setting available gpus
     gpus_que = queue.Queue(3)
-    for i in [1,2,3]:
+    for i in [1, 2, 3]:
         gpus_que.put(i)
-    
+
     os.makedirs(f"log/{expFolder}", exist_ok=True)
 
     def run_program(gpu, expname, param):
         cmd = f'CUDA_VISIBLE_DEVICES={gpu}  python train.py ' \
-            f'--expname {expname} --basedir ./log/{expFolder} --config configs/lego.txt ' \
-            f'{param}' \
-            f'> "log/{expFolder}{expname}/{expname}.txt"'
+              f'--expname {expname} --basedir ./log/{expFolder} --config configs/lego.txt ' \
+              f'{param}' \
+              f'> "log/{expFolder}{expname}/{expname}.txt"'
         print(cmd)
         os.system(cmd)
         gpus_que.put(gpu)
 
     params, expnames = get_param_list(param_dict)
 
-    
-    logFolder=f"log/{expFolder}"
+    logFolder = f"log/{expFolder}"
     os.makedirs(logFolder, exist_ok=True)
 
     ths = []
@@ -184,7 +179,6 @@ if __name__ == '__main__':
 
         if getStopFolder(logFolder):
             break
-
 
         targetFolder = f"log/{expFolder}{expnames[i]}"
         gpu = gpus_que.get()
@@ -195,13 +189,17 @@ if __name__ == '__main__':
             continue
         else:
             os.makedirs(targetFolder, exist_ok=True)
-            print("making",targetFolder, "running",expnames[i], params[i])
+            print("making", targetFolder, "running", expnames[i], params[i])
             releaseFolderLocker(logFolder)
-
 
         t = threading.Thread(target=run_program, args=(gpu, expnames[i], params[i]), daemon=True)
         t.start()
         ths.append(t)
-    
+
     for th in ths:
         th.join()
+
+
+if __name__ == '__main__':
+    datafolder = '/mnt/new_disk_2/anpei/Dataset/nerf_synthetic/'
+    main()
