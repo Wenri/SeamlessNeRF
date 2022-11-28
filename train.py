@@ -84,6 +84,7 @@ class Trainer:
         self.summary_writer = None
         self.trainingSampler = None
         self.logger = logging.getLogger(type(self).__name__)
+        self.ones = torch.ones((1, 1), device=self.device)
 
     def build_palette(self, filepath):
         filepath = Path(filepath)
@@ -143,8 +144,8 @@ class Trainer:
             ndc_ray=ndc_ray, device=self.device, is_train=True)
 
         rgb_map, E_opaque = rgb_map[..., :3], rgb_map[..., 3:]
-        E_opaque = F.l1_loss(E_opaque, torch.ones_like(E_opaque), reduction='mean')
-        loss = torch.mean(torch.square(rgb_map - rgb_train))
+        E_opaque = F.mse_loss(E_opaque, self.ones.expand_as(E_opaque), reduction='mean')
+        loss = F.mse_loss(rgb_map, rgb_train, reduction='mean')
 
         # loss
         total_loss = loss - E_opaque / 375
