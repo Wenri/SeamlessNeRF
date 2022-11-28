@@ -6,9 +6,10 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from einops import rearrange
 from torch.utils.tensorboard import SummaryWriter
-from tqdm import tqdm, trange
+from tqdm import trange
 
 from dataLoader import dataset_dict
 from models import MODEL_ZOO
@@ -142,7 +143,7 @@ class Trainer:
             ndc_ray=ndc_ray, device=self.device, is_train=True)
 
         rgb_map, E_opaque = rgb_map[..., :3], rgb_map[..., 3:]
-        E_opaque = torch.mean(torch.square(1. - E_opaque))
+        E_opaque = F.l1_loss(E_opaque, torch.ones_like(E_opaque), reduction='mean')
         loss = torch.mean(torch.square(rgb_map - rgb_train))
 
         # loss
