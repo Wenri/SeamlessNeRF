@@ -77,26 +77,24 @@ def Hull_Simplification_unspecified_M(data, output_prefix, start_save=10):
             return
 
 
-def Hull_Simplification_old(arr, M, output_prefix):
+def Hull_Simplification_old(arr, E_vertice_num=4):
     hull = ConvexHull(arr.reshape((-1, 3)))
     # print hull.points[hull.vertices].shape
-    output_rawhull_obj_file = output_prefix + "-mesh_obj_files.obj"
-    write_convexhull_into_obj_file(hull, output_rawhull_obj_file)
-    mesh = TriMesh.FromOBJ_FileName(output_rawhull_obj_file)
-
+    with io.StringIO() as f:
+        write_convexhull_into_obj_file(hull, f)
+        output_rawhull_obj_file = f.getvalue()
     max_loop = 5000
     for i in range(max_loop):
+        mesh = TriMesh.FromOBJ_Lines(output_rawhull_obj_file.splitlines())
         old_num = len(mesh.vs)
-        mesh = TriMesh.FromOBJ_FileName(output_rawhull_obj_file)
         mesh = remove_one_edge_by_finding_smallest_adding_volume_with_test_conditions(mesh, option=2)
-        newhull = ConvexHull(mesh.vs)
-        write_convexhull_into_obj_file(newhull, output_rawhull_obj_file)
-
-        if len(mesh.vs) == M or len(newhull.vertices) == old_num or len(newhull.vertices) == 4:
-            Final_hull = newhull
+        hull = ConvexHull(mesh.vs)
+        with io.StringIO() as f:
+            write_convexhull_into_obj_file(hull, f)
+            output_rawhull_obj_file = f.getvalue()
+        if len(hull.vertices) == old_num or len(hull.vertices) <= E_vertice_num:
             break
-
-    Hull_vertices = Final_hull.points[Final_hull.vertices].clip(0, 1)
+    Hull_vertices = hull.points[hull.vertices].clip(0, 1)
     return Hull_vertices
 
 

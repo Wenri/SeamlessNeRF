@@ -13,7 +13,8 @@ from tqdm import trange
 
 from dataLoader import dataset_dict
 from models import MODEL_ZOO
-from models.palette.Additive_mixing_layers_extraction import Hull_Simplification_determined_version
+from models.palette.Additive_mixing_layers_extraction import Hull_Simplification_determined_version, \
+    Hull_Simplification_old
 from opt import config_parser
 from renderer import OctreeRender_trilinear_fast, evaluation, evaluation_path
 from utils import convert_sdf_samples_to_ply, N_to_reso, cal_n_samples, TVLoss
@@ -86,6 +87,29 @@ class Trainer:
         self.logger = logging.getLogger(type(self).__name__)
         self.ones = torch.ones((1, 1), device=self.device)
 
+    def sample_sems(self, coord):
+        half_wh = torch.tensor(self.train_dataset.img_wh, device=coord.device) / 2
+        rem_coord = torch.fliplr(coord[:, 1:]) / half_wh - 1
+        all_sems = []
+        for idx, cnt in zip(*torch.unique_consecutive(coord[:, 0], return_counts=True)):
+            sems = self.train_dataset.all_sems[idx]
+            sems = rearrange(torch.from_numpy(sems), 'H W C -> 1 C H W').expand(cnt, -1, -1, -1)
+            coord = rearrange(rem_coord[:cnt], 'n pos -> n 1 1 pos')
+            sems = F.grid_sample(sems, coord, align_corners=True)
+            all_sems.append(rearrange(sems, 'n c 1 1 -> n c'))
+            rem_coord = rem_coord[cnt:]
+        return torch.cat(all_sems, 0)
+
+    def build_sem_palette(self):
+        w, h = self.train_dataset.img_wh
+        if self.train_dataset.white_bg:
+            fg = torch.lt(self.train_dataset.all_rgbs, 1.).any(dim=-1)
+        else:
+            fg = torch.ones(self.train_dataset.all_rgbs.shape[:-1], dtype=torch.bool)
+        coord = rearrange(fg, '(n h w) -> n h w', h=h, w=w).nonzero()
+        rgbs = self.sample_sems(coord)
+        return Hull_Simplification_old(rgbs.to(device='cpu', dtype=torch.double).numpy())
+
     def build_palette(self, filepath):
         filepath = Path(filepath)
         rgbs = self.train_dataset.all_rgbs
@@ -102,6 +126,9 @@ class Trainer:
         dist = torch.argmin(dist, dim=-1)
         dist = torch.argsort(torch.bincount(dist))
 
+        paltsem = self.build_sem_palette()
+        print(paltsem.shape)
+        print(paltsem)
         # bg = np.ones(3) if dataset.white_bg else np.zeros(3)
         # palette_rgb = [tuple(a.tolist()) for a in palette_rgb[dist.cpu().numpy()] if not np.allclose(a, bg)]
         # palette_rgb.append(tuple(bg.tolist()))

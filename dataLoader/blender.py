@@ -8,7 +8,7 @@ from torchvision import transforms as T
 from tqdm import tqdm
 
 from .ray_utils import *
-from .semantic_helper import VGGSemantic
+from .semantic_helper import VGGSemantic, PCASemantic
 
 
 class BlenderDataset(Dataset):
@@ -21,13 +21,13 @@ class BlenderDataset(Dataset):
         self.img_wh = (int(800 / downsample), int(800 / downsample))
         self.define_transforms()
 
-        self.scene_bbox = torch.tensor([[-1.5, -1.5, -1.5], [1.5, 1.5, 1.5]])
-        self.blender2opencv = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
+        self.scene_bbox = torch.tensor(((-1.5, -1.5, -1.5), (1.5, 1.5, 1.5)))
+        self.blender2opencv = np.array(((1, 0, 0, 0), (0, -1, 0, 0), (0, 0, -1, 0), (0, 0, 0, 1)))
         self.read_meta()
         self.define_proj_mat()
 
         self.white_bg = True
-        self.near_far = [2.0, 6.0]
+        self.near_far = (2.0, 6.0)
 
         self.center = torch.mean(self.scene_bbox, axis=0).float().view(1, 1, 3)
         self.radius = (self.scene_bbox[1] - self.center).float().view(1, 1, 3)
@@ -38,9 +38,12 @@ class BlenderDataset(Dataset):
         return depth
 
     def read_meta(self):
-        vgg = VGGSemantic()
-        vgg.cuda()
-        vgg.eval()
+        if self.split == 'train':
+            vgg = VGGSemantic()
+            vgg.cuda()
+            vgg.eval()
+        else:
+            vgg = None
 
         with open(os.path.join(self.root_dir, f"transforms_{self.split}.json"), 'r') as f:
             self.meta = json.load(f)
@@ -82,8 +85,9 @@ class BlenderDataset(Dataset):
             img = self.transform(img)  # (4, h, w)
             img = img[:3] * img[-1:] + (1 - img[-1:])  # blend A to RGB
 
-            with torch.no_grad():
-                self.all_sems.append(vgg(img.cuda()).cpu().numpy())
+            if vgg:
+                with torch.no_grad():
+                    self.all_sems.append(rearrange(vgg(img.cuda()), 'N C H W -> N H W C').cpu())
 
             img = rearrange(img, 'c h w -> (h w) c')  # RGBA
             self.all_rgbs += [img]
@@ -95,13 +99,19 @@ class BlenderDataset(Dataset):
         if not self.is_stack:
             self.all_rays = torch.cat(self.all_rays, 0)  # (len(self.meta['frames])*h*w, 3)
             self.all_rgbs = torch.cat(self.all_rgbs, 0)  # (len(self.meta['frames])*h*w, 3)
-
-        #             self.all_depth = torch.cat(self.all_depth, 0)  # (len(self.meta['frames])*h*w, 3)
+            # self.all_depth = torch.cat(self.all_depth, 0)  # (len(self.meta['frames])*h*w, 3)
         else:
             self.all_rays = torch.stack(self.all_rays, 0)  # (len(self.meta['frames]),h*w, 3)
-            self.all_rgbs = torch.stack(self.all_rgbs, 0).reshape(-1, *self.img_wh[::-1],
-                                                                  3)  # (len(self.meta['frames]),h,w,3)
+            self.all_rgbs = torch.stack(
+                self.all_rgbs, 0).reshape(-1, *self.img_wh[::-1], 3)  # (len(self.meta['frames]),h,w,3)
             # self.all_masks = torch.stack(self.all_masks, 0).reshape(-1,*self.img_wh[::-1])  # (len(self.meta['frames]),h,w,3)
+        if vgg:
+            self.all_sems = torch.cat(self.all_sems, 0)
+            self.all_sems = PCASemantic(self).build_semantic().transform(
+                rearrange(self.all_sems, 'N H W C -> (N H W) C').numpy())
+            self.all_sems -= np.min(self.all_sems, axis=0)
+            self.all_sems /= np.max(self.all_sems, axis=0)
+            self.all_sems = rearrange(self.all_sems, '(N H W) C -> N H W C', **vgg.target_size._asdict())
 
     def define_transforms(self):
         self.transform = T.ToTensor()

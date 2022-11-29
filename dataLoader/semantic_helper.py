@@ -1,4 +1,8 @@
+from collections import namedtuple
+
 import torch
+from einops import rearrange
+from sklearn.decomposition import PCA
 from torch import nn
 from torch.nn import functional as F
 from torchvision import models
@@ -6,6 +10,8 @@ from torchvision.models import VGG16_Weights
 
 
 class VGGSemantic(nn.Module):
+    IMAGE_SIZE_T = namedtuple('IMAGE_SIZE_T', 'H W')
+
     def __init__(self):
         super().__init__()
         self.vgg = models.vgg16(weights=VGG16_Weights.DEFAULT)
@@ -14,7 +20,7 @@ class VGGSemantic(nn.Module):
             if isinstance(layer, nn.MaxPool2d):
                 layer.register_forward_pre_hook(self._call_back)
         self.layer_features = {}
-        self.target_size = (224, 224)
+        self.target_size = self.IMAGE_SIZE_T(224, 224)
 
     def __enter__(self):
         self.layer_features.clear()
@@ -38,4 +44,19 @@ class VGGSemantic(nn.Module):
                 if out.shape[-2:] != self.target_size:
                     out = F.interpolate(out, self.target_size, mode='nearest')
                 x.append(out)
-        return torch.cat(x[-2:], dim=1)
+        return torch.cat(x, dim=1)
+
+
+class PCASemantic:
+    def __init__(self, dataset, n_components=3):
+        self.dataset = dataset
+        self.pca = PCA(n_components=n_components)
+
+    def build_semantic(self):
+        sems = self.dataset.all_sems
+        w, h = self.dataset.img_wh
+        all_imgs = rearrange(self.dataset.all_rgbs, '(n h w) c -> n c h w', h=w, w=w)
+        all_imgs = F.interpolate(all_imgs, size=sems.shape[1:-1], mode='bilinear')
+        fg = torch.lt(all_imgs, 1.).any(dim=1)
+        sems = sems[fg].numpy()
+        return self.pca.fit(sems)
