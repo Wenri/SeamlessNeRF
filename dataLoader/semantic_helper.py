@@ -1,4 +1,6 @@
+import torch
 from torch import nn
+from torch.nn import functional as F
 from torchvision import models
 from torchvision.models import VGG16_Weights
 
@@ -12,6 +14,14 @@ class VGGSemantic(nn.Module):
             if isinstance(layer, nn.MaxPool2d):
                 layer.register_forward_pre_hook(self._call_back)
         self.layer_features = {}
+        self.target_size = (224, 224)
+
+    def __enter__(self):
+        self.layer_features.clear()
+        return self.layer_features
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.layer_features.clear()
 
     def _call_back(self, layer, args):
         x = args[0]
@@ -20,10 +30,12 @@ class VGGSemantic(nn.Module):
 
     def forward(self, x):
         x = self.preprocess(x).unsqueeze(0)
-
         self.layer_features.clear()
-        self.vgg.features(x)
-        x = list(self.layer_features.values())
-        self.layer_features.clear()
-
-        return x
+        with self as features:
+            self.vgg.features(x)
+            x = []
+            for out in features.values():
+                if out.shape[-2:] != self.target_size:
+                    out = F.interpolate(out, self.target_size, mode='nearest')
+                x.append(out)
+        return torch.cat(x[-2:], dim=1)

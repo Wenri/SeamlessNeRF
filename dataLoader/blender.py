@@ -60,6 +60,7 @@ class BlenderDataset(Dataset):
         self.all_rgbs = []
         self.all_masks = []
         self.all_depth = []
+        self.all_sems = []
         self.downsample = 1.0
 
         img_eval_interval = 1 if self.N_vis < 0 else len(self.meta['frames']) // self.N_vis
@@ -82,7 +83,7 @@ class BlenderDataset(Dataset):
             img = img[:3] * img[-1:] + (1 - img[-1:])  # blend A to RGB
 
             with torch.no_grad():
-                sem = vgg(img.cuda())
+                self.all_sems.append(vgg(img.cuda()).cpu().numpy())
 
             img = rearrange(img, 'c h w -> (h w) c')  # RGBA
             self.all_rgbs += [img]
