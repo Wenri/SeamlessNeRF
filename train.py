@@ -1,6 +1,7 @@
 import logging
 import os
 import sys
+from collections import namedtuple
 from datetime import datetime
 from pathlib import Path
 
@@ -8,13 +9,15 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from einops import rearrange
+from scipy.spatial import ConvexHull, Delaunay
 from torch.utils.tensorboard import SummaryWriter
-from tqdm import trange
+from tqdm import trange, tqdm
 
 from dataLoader import dataset_dict
 from models import MODEL_ZOO
 from models.palette.Additive_mixing_layers_extraction import Hull_Simplification_determined_version, \
     Hull_Simplification_old
+from models.palette.GteDistPointTriangle import DCPPointTriangle
 from opt import config_parser
 from renderer import OctreeRender_trilinear_fast, evaluation, evaluation_path
 from utils import convert_sdf_samples_to_ply, N_to_reso, cal_n_samples, TVLoss
@@ -45,6 +48,8 @@ class SimpleSampler:
 
 
 class Trainer:
+    _DCP_RET = namedtuple('DCP_RET', 'parameter closest distance sqrDistance')
+
     def __init__(self, args):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.renderer = OctreeRender_trilinear_fast
@@ -61,6 +66,10 @@ class Trainer:
         self.reso_mask = None
         self.nSamples = min(args.nSamples, cal_n_samples(self.reso_cur, args.step_ratio))
         self.palette = self.build_palette(args.datadir)
+        self.palette_sem = self.build_sem_palette()
+
+        print(self.palette_sem.shape)
+        print(self.palette_sem)
 
         # linear in logrithmic space
         self.N_voxel_list = torch.round(torch.exp(torch.linspace(
@@ -107,8 +116,18 @@ class Trainer:
         else:
             fg = torch.ones(self.train_dataset.all_rgbs.shape[:-1], dtype=torch.bool)
         coord = rearrange(fg, '(n h w) -> n h w', h=h, w=w).nonzero()
-        rgbs = self.sample_sems(coord)
-        return Hull_Simplification_old(rgbs.to(device='cpu', dtype=torch.double).numpy())
+        rgbs = self.sample_sems(coord).to(device='cpu', dtype=torch.double).numpy()
+        return Hull_Simplification_old(rgbs, E_vertice_num=6)
+
+    def recon_with_palette(self, palette, points):
+        hull = ConvexHull(palette)
+        de = Delaunay(hull.points[hull.vertices].clip(0.0, 1.0))
+        ind = de.find_simplex(points, tol=1e-8)
+        for i in tqdm(np.nonzero(ind < 0)[0], desc='recon_with_palette'):
+            dist_list = [self._DCP_RET(**DCPPointTriangle(points[i], hull.points[j])) for j in hull.simplices]
+            idx = np.fromiter((j.distance for j in dist_list), dtype=np.float_, count=len(dist_list)).argmin()
+            points[i] = dist_list[idx].closest
+        return points
 
     def build_palette(self, filepath):
         filepath = Path(filepath)
@@ -116,23 +135,19 @@ class Trainer:
         if self.train_dataset.white_bg:
             fg = torch.lt(rgbs, 1.).any(dim=-1)
             rgbs = rgbs[fg]
+        rgbs = rgbs.to(device='cpu', dtype=torch.double).numpy()
         palette_rgb = Hull_Simplification_determined_version(
-            rgbs.to(device='cpu', dtype=torch.double).numpy(),
-            filepath.stem + "-convexhull_vertices", error_thres=1. / 256.)
+            rgbs, filepath.stem + "-convexhull_vertices", error_thres=1. / 256.)
 
-        dist = rearrange(rgbs, 'N C -> N 1 C') - rearrange(torch.from_numpy(palette_rgb).to(rgbs.device),
-                                                           'P C -> 1 P C')
-        dist = torch.linalg.vector_norm(dist, dim=-1)
-        dist = torch.argmin(dist, dim=-1)
-        dist = torch.argsort(torch.bincount(dist))
+        dist = rearrange(rgbs, 'N C -> N 1 C') - rearrange(palette_rgb, 'P C -> 1 P C')
+        dist = np.linalg.norm(dist, axis=-1)
+        dist = np.argmin(dist, axis=-1)
+        dist = np.argsort(np.bincount(dist))
 
-        paltsem = self.build_sem_palette()
-        print(paltsem.shape)
-        print(paltsem)
         # bg = np.ones(3) if dataset.white_bg else np.zeros(3)
         # palette_rgb = [tuple(a.tolist()) for a in palette_rgb[dist.cpu().numpy()] if not np.allclose(a, bg)]
         # palette_rgb.append(tuple(bg.tolist()))
-        palette_rgb = [tuple(a) for a in palette_rgb[dist.cpu().numpy()].tolist()]
+        palette_rgb = [tuple(a) for a in palette_rgb[dist].tolist()]
         return palette_rgb
 
     def build_network(self):
