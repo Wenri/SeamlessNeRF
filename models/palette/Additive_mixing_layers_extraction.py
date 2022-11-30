@@ -7,6 +7,7 @@ import json
 import logging
 import sys
 import time
+from collections import namedtuple
 
 import PIL.Image as Image
 import numpy as np
@@ -22,6 +23,8 @@ from .TriMesh import TriMesh
 
 pyximport.install(reload_support=True)
 from .GteDistPointTriangle import DCPPointTriangle
+
+_DCP_PT_RET = namedtuple('_DCP_PT_RET', 'parameter closest distance sqrDistance')
 
 
 def Convert_scipy_convexhull_face_ind_to_basic_face_ind(hull):
@@ -132,16 +135,11 @@ def outsidehull_points_distance(hull_vertices, points):
     ######### here points are all pixel colors
     hull = ConvexHull(hull_vertices)
     de = Delaunay(hull_vertices)
-    ind = de.find_simplex(points, tol=1e-8)
-    total_distance = []
-    for i in range(points.shape[0]):
-        if ind[i] < 0:
-            dist_list = []
-            for j in range(hull.simplices.shape[0]):
-                result = DCPPointTriangle(points[i], hull.points[hull.simplices[j]])
-                dist_list.append(result['distance'])
-            total_distance.append(min(dist_list))
-    total_distance = np.asarray(total_distance)
+    ind, = np.nonzero(de.find_simplex(points, tol=1e-8) < 0)
+    total_distance = np.fromiter((
+        min(DCPPointTriangle(points[i], hull.points[j])['distance'] for j in hull.simplices)
+        for i in ind), dtype=np.double, count=len(ind)
+    )
 
     return ((total_distance ** 2).sum() / len(points)) ** 0.5
 
@@ -150,21 +148,13 @@ def outsidehull_points_distance_for_using_origin_hull_vertices(hull_vertices, al
     ######### here all_points are all pixel colors. points are original hull vertices of all pixel colors.
     hull = ConvexHull(hull_vertices)
     de = Delaunay(hull_vertices)
-    ind1 = de.find_simplex(all_points, tol=1e-8)
-    length1 = len(ind1[ind1 < 0])
-
-    ind = de.find_simplex(points, tol=1e-8)
-    length = len(ind[ind < 0])
-
-    total_distance = []
-    for i in range(points.shape[0]):
-        if ind[i] < 0:
-            dist_list = []
-            for j in range(hull.simplices.shape[0]):
-                result = DCPPointTriangle(points[i], hull.points[hull.simplices[j]])
-                dist_list.append(result['distance'])
-            total_distance.append(min(dist_list))
-    total_distance = np.asarray(total_distance)
+    length1 = np.count_nonzero(de.find_simplex(all_points, tol=1e-8) < 0)
+    ind, = np.nonzero(de.find_simplex(points, tol=1e-8) < 0)
+    length = len(ind)
+    total_distance = np.fromiter((
+        min(DCPPointTriangle(points[i], hull.points[j])['distance'] for j in hull.simplices)
+        for i in ind), dtype=np.double, count=length
+    )
 
     pixel_numbers = len(all_points)
 
@@ -177,18 +167,13 @@ def outsidehull_points_distance_unique_data_version(hull_vertices, points, count
     ######### here, points are unique pixel colors, it will be faster than directly give all pixel colors.
     hull = ConvexHull(hull_vertices)
     de = Delaunay(hull_vertices)
-    ind = de.find_simplex(points, tol=1e-8)
-    total_distance = []
-    for i in range(points.shape[0]):
-        if ind[i] < 0:
-            dist_list = []
-            for j in range(hull.simplices.shape[0]):
-                result = DCPPointTriangle(points[i], hull.points[hull.simplices[j]])
-                dist_list.append(result['distance'])
-            total_distance.append(min(dist_list))
-    total_distance = np.asarray(total_distance)
+    ind, = np.nonzero(de.find_simplex(points, tol=1e-8) < 0)
+    total_distance = np.fromiter((
+        min(DCPPointTriangle(points[i], hull.points[j])['distance'] for j in hull.simplices)
+        for i in ind), dtype=np.double, count=len(ind)
+    )
 
-    return (((total_distance ** 2) * counts[ind < 0]).sum() / counts.sum()) ** 0.5
+    return (((total_distance ** 2) * counts[ind]).sum() / counts.sum()) ** 0.5
 
 
 def get_unique_colors_and_their_counts(arr):

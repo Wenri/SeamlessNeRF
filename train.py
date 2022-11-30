@@ -1,7 +1,6 @@
 import logging
 import os
 import sys
-from collections import namedtuple
 from datetime import datetime
 from pathlib import Path
 
@@ -16,7 +15,7 @@ from tqdm import trange, tqdm
 from dataLoader import dataset_dict
 from models import MODEL_ZOO
 from models.palette.Additive_mixing_layers_extraction import Hull_Simplification_determined_version, \
-    Hull_Simplification_old
+    Hull_Simplification_old, _DCP_PT_RET
 from models.palette.GteDistPointTriangle import DCPPointTriangle
 from opt import config_parser
 from renderer import OctreeRender_trilinear_fast, evaluation, evaluation_path
@@ -48,8 +47,6 @@ class SimpleSampler:
 
 
 class Trainer:
-    _DCP_RET = namedtuple('DCP_RET', 'parameter closest distance sqrDistance')
-
     def __init__(self, args):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.renderer = OctreeRender_trilinear_fast
@@ -124,7 +121,7 @@ class Trainer:
         de = Delaunay(hull.points[hull.vertices].clip(0.0, 1.0))
         ind = de.find_simplex(points, tol=1e-8)
         for i in tqdm(np.nonzero(ind < 0)[0], desc='recon_with_palette'):
-            dist_list = [self._DCP_RET(**DCPPointTriangle(points[i], hull.points[j])) for j in hull.simplices]
+            dist_list = [_DCP_PT_RET(**DCPPointTriangle(points[i], hull.points[j])) for j in hull.simplices]
             idx = np.fromiter((j.distance for j in dist_list), dtype=np.float_, count=len(dist_list)).argmin()
             points[i] = dist_list[idx].closest
         return points
