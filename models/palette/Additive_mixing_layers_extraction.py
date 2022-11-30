@@ -5,6 +5,7 @@ import gzip
 import io
 import json
 import logging
+import math
 import sys
 import time
 from collections import namedtuple
@@ -136,31 +137,27 @@ def outsidehull_points_distance(hull_vertices, points):
     hull = ConvexHull(hull_vertices)
     de = Delaunay(hull_vertices)
     ind, = np.nonzero(de.find_simplex(points, tol=1e-8) < 0)
-    total_distance = np.fromiter((
-        min(DCPPointTriangle(points[i], hull.points[j])['distance'] for j in hull.simplices)
-        for i in ind), dtype=np.double, count=len(ind)
-    )
+    total_distance = sum(
+        min(DCPPointTriangle(points[i], hull.points[j])['distance'] for j in hull.simplices) ** 2
+        for i in ind)
 
-    return ((total_distance ** 2).sum() / len(points)) ** 0.5
+    return math.sqrt(total_distance / len(points))
 
 
 def outsidehull_points_distance_for_using_origin_hull_vertices(hull_vertices, all_points, points):
     ######### here all_points are all pixel colors. points are original hull vertices of all pixel colors.
     hull = ConvexHull(hull_vertices)
     de = Delaunay(hull_vertices)
-    length1 = np.count_nonzero(de.find_simplex(all_points, tol=1e-8) < 0)
+    length1 = np.count_nonzero(de.find_simplex(all_points, tol=1e-8) < 0).item()
     ind, = np.nonzero(de.find_simplex(points, tol=1e-8) < 0)
     length = len(ind)
-    total_distance = np.fromiter((
-        min(DCPPointTriangle(points[i], hull.points[j])['distance'] for j in hull.simplices)
-        for i in ind), dtype=np.double, count=length
-    )
+    total_distance = sum(
+        min(DCPPointTriangle(points[i], hull.points[j])['distance'] for j in hull.simplices) ** 2
+        for i in ind)
 
     pixel_numbers = len(all_points)
-
     # return ((total_distance**2).sum()/pixel_numbers)**0.5
-
-    return ((((total_distance ** 2).sum() * length1) / length) / pixel_numbers) ** 0.5
+    return math.sqrt(total_distance * length1 / length / pixel_numbers)
 
 
 def outsidehull_points_distance_unique_data_version(hull_vertices, points, counts):
@@ -168,12 +165,11 @@ def outsidehull_points_distance_unique_data_version(hull_vertices, points, count
     hull = ConvexHull(hull_vertices)
     de = Delaunay(hull_vertices)
     ind, = np.nonzero(de.find_simplex(points, tol=1e-8) < 0)
-    total_distance = np.fromiter((
-        min(DCPPointTriangle(points[i], hull.points[j])['distance'] for j in hull.simplices)
-        for i in ind), dtype=np.double, count=len(ind)
-    )
+    total_distance = sum(
+        min(DCPPointTriangle(points[i], hull.points[j])['distance'] for j in hull.simplices) ** 2
+        * counts[i] for i in ind)
 
-    return (((total_distance ** 2) * counts[ind]).sum() / counts.sum()) ** 0.5
+    return math.sqrt(total_distance / counts.sum().item())
 
 
 def get_unique_colors_and_their_counts(arr):
