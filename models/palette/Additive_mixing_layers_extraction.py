@@ -81,25 +81,31 @@ def Hull_Simplification_unspecified_M(data, output_prefix, start_save=10):
             return
 
 
-def Hull_Simplification_old(arr, E_vertice_num=4):
+def Hull_Simplification_old(arr, E_vertice_num=10, error_thres=None):
     hull = ConvexHull(arr.reshape((-1, 3)))
     # print hull.points[hull.vertices].shape
     with io.StringIO() as f:
         write_convexhull_into_obj_file(hull, f)
         output_rawhull_obj_file = f.getvalue()
+    unique_data, pixel_counts = get_unique_colors_and_their_counts(arr.reshape((-1, 3)))
     max_loop = 5000
     for i in range(max_loop):
         mesh = TriMesh.FromOBJ_Lines(output_rawhull_obj_file.splitlines())
         old_num = len(mesh.vs)
+        old_vertices = mesh.vs
         mesh = remove_one_edge_by_finding_smallest_adding_volume_with_test_conditions(mesh, option=2)
         hull = ConvexHull(mesh.vs)
         with io.StringIO() as f:
             write_convexhull_into_obj_file(hull, f)
             output_rawhull_obj_file = f.getvalue()
         if len(hull.vertices) == old_num or len(hull.vertices) <= E_vertice_num:
-            break
-    Hull_vertices = hull.points[hull.vertices].clip(0, 1)
-    return Hull_vertices
+            if error_thres is None or outsidehull_points_distance_unique_data_version(
+                    hull.points[hull.vertices].clip(0.0, 1.0), unique_data, pixel_counts
+            ) > error_thres or len(hull.vertices) == 4:
+                if len(hull.vertices) < E_vertice_num:
+                    hull = ConvexHull(old_vertices)
+                break
+    return hull.points[hull.vertices].clip(0, 1)
 
 
 # ##### assume arr is in range(0,1)

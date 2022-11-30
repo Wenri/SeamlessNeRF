@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import torchvision.transforms as T
 from PIL import Image
+from einops import rearrange
 
 
 def mse2psnr(x):
@@ -148,3 +149,16 @@ def convert_sdf_samples_to_ply(
     ply_data = plyfile.PlyData([el_verts, el_faces])
     print("saving mesh to %s" % ply_filename_out)
     ply_data.write(ply_filename_out)
+
+
+def sort_palette(rgbs, palette_rgb):
+    dist = rearrange(rgbs, 'N C -> N 1 C') - rearrange(palette_rgb, 'P C -> 1 P C')
+    dist = np.linalg.norm(dist, axis=-1)
+    dist = np.argmin(dist, axis=-1)
+    dist = np.argsort(np.bincount(dist))
+
+    # bg = np.ones(3) if dataset.white_bg else np.zeros(3)
+    # palette_rgb = [tuple(a.tolist()) for a in palette_rgb[dist.cpu().numpy()] if not np.allclose(a, bg)]
+    # palette_rgb.append(tuple(bg.tolist()))
+    palette_rgb = [tuple(a) for a in palette_rgb[dist].tolist()]
+    return palette_rgb

@@ -19,7 +19,7 @@ from models.palette.Additive_mixing_layers_extraction import Hull_Simplification
 from models.palette.GteDistPointTriangle import DCPPointTriangle
 from opt import config_parser
 from renderer import OctreeRender_trilinear_fast, evaluation, evaluation_path
-from utils import convert_sdf_samples_to_ply, N_to_reso, cal_n_samples, TVLoss
+from utils import convert_sdf_samples_to_ply, N_to_reso, cal_n_samples, TVLoss, sort_palette
 
 
 class SimpleSampler:
@@ -63,9 +63,8 @@ class Trainer:
         self.reso_mask = None
         self.nSamples = min(args.nSamples, cal_n_samples(self.reso_cur, args.step_ratio))
         self.palette = self.build_palette(args.datadir)
-        self.palette_sem = self.build_sem_palette()
+        self.palette_sem = self.build_sem_palette(len(self.palette))
 
-        print(self.palette_sem.shape)
         print(self.palette_sem)
 
         # linear in logrithmic space
@@ -106,16 +105,6 @@ class Trainer:
             rem_coord = rem_coord[cnt:]
         return torch.cat(all_sems, 0)
 
-    def build_sem_palette(self):
-        w, h = self.train_dataset.img_wh
-        if self.train_dataset.white_bg:
-            fg = torch.lt(self.train_dataset.all_rgbs, 1.).any(dim=-1)
-        else:
-            fg = torch.ones(self.train_dataset.all_rgbs.shape[:-1], dtype=torch.bool)
-        coord = rearrange(fg, '(n h w) -> n h w', h=h, w=w).nonzero()
-        rgbs = self.sample_sems(coord).to(device='cpu', dtype=torch.double).numpy()
-        return Hull_Simplification_old(rgbs, E_vertice_num=6)
-
     def recon_with_palette(self, palette, points):
         hull = ConvexHull(palette)
         de = Delaunay(hull.points[hull.vertices].clip(0.0, 1.0))
@@ -133,19 +122,18 @@ class Trainer:
             fg = torch.lt(rgbs, 1.).any(dim=-1)
             rgbs = rgbs[fg]
         rgbs = rgbs.to(device='cpu', dtype=torch.double).numpy()
-        palette_rgb = Hull_Simplification_determined_version(
-            rgbs, filepath.stem + "-convexhull_vertices", error_thres=1. / 256.)
+        return sort_palette(rgbs, Hull_Simplification_determined_version(
+            rgbs, filepath.stem + "-convexhull_vertices", error_thres=1. / 256.))
 
-        dist = rearrange(rgbs, 'N C -> N 1 C') - rearrange(palette_rgb, 'P C -> 1 P C')
-        dist = np.linalg.norm(dist, axis=-1)
-        dist = np.argmin(dist, axis=-1)
-        dist = np.argsort(np.bincount(dist))
-
-        # bg = np.ones(3) if dataset.white_bg else np.zeros(3)
-        # palette_rgb = [tuple(a.tolist()) for a in palette_rgb[dist.cpu().numpy()] if not np.allclose(a, bg)]
-        # palette_rgb.append(tuple(bg.tolist()))
-        palette_rgb = [tuple(a) for a in palette_rgb[dist].tolist()]
-        return palette_rgb
+    def build_sem_palette(self, E_vertice_num=10):
+        w, h = self.train_dataset.img_wh
+        if self.train_dataset.white_bg:
+            fg = torch.lt(self.train_dataset.all_rgbs, 1.).any(dim=-1)
+        else:
+            fg = torch.ones(self.train_dataset.all_rgbs.shape[:-1], dtype=torch.bool)
+        coord = rearrange(fg, '(n h w) -> n h w', h=h, w=w).nonzero()
+        rgbs = self.sample_sems(coord).to(device='cpu', dtype=torch.double).numpy()
+        return sort_palette(rgbs, Hull_Simplification_old(rgbs, E_vertice_num=E_vertice_num, error_thres=1. / 256.))
 
     def build_network(self):
         args = self.args
