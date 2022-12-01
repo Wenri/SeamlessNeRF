@@ -26,13 +26,11 @@ class SimpleSampler:
     def __init__(self, train_dataset, batch):
         total = train_dataset.all_rays.shape[0]
         w, h = train_dataset.img_wh
-        rgb_shape = (train_dataset.all_sems.shape[0], h, w)
-        coord = torch.from_numpy(np.stack(np.unravel_index(np.arange(total), rgb_shape), axis=-1))
+        self.rgb_shape = (train_dataset.all_sems.shape[0], h, w)
         self.dataset = train_dataset
         self.batch = batch
         self.curr = total
-        self.ids = torch.randperm(total)
-        self.all_sems = train_dataset.sample_sems(coord)
+        self.ids = np.random.permutation(total)
 
     def apply_filter(self, func, *args, **kwargs):
         mask_filtered = func(self.dataset.all_rays[self.ids], *args, **kwargs)
@@ -43,14 +41,15 @@ class SimpleSampler:
         total = self.ids.shape[0]
         self.curr += self.batch
         if self.curr + self.batch > total:
-            self.ids = self.ids[torch.randperm(total)]
+            np.random.shuffle(self.ids)
             self.curr = 0
         return self.ids[self.curr:self.curr + self.batch]
 
     def getbatch(self, device):
         ids = self.nextids()
-        return self.dataset.all_rays[ids].to(device), self.dataset.all_rgbs[ids].to(device), \
-            self.all_sems[ids].to(device)
+        sems = torch.from_numpy(np.stack(np.unravel_index(ids, self.rgb_shape), axis=-1)).to(device)
+        sems = self.dataset.sample_sems(sems)
+        return self.dataset.all_rays[ids].to(device), self.dataset.all_rgbs[ids].to(device), sems
 
 
 class Trainer:
@@ -154,7 +153,13 @@ class Trainer:
 
         return tensorf
 
-    def train_one_batch(self, tensorf, iteration, rays_train, rgb_train, sem_train):
+    def plt_loss(self, plt_map, gt_train):
+        pix, opq = plt_map[..., :3], plt_map[..., 3:]
+        E_opaque = F.mse_loss(opq, self.ones.expand_as(opq), reduction='mean')
+        loss = F.mse_loss(pix, gt_train, reduction='mean')
+        return loss, E_opaque
+
+    def train_one_batch(self, tensorf, iteration, rays_train, *batch_gt):
         args = self.args
         white_bg = self.train_dataset.white_bg
         ndc_ray = args.ndc_ray
@@ -165,15 +170,12 @@ class Trainer:
             rays_train, tensorf, chunk=args.batch_size, N_samples=self.nSamples, white_bg=white_bg,
             ndc_ray=ndc_ray, device=self.device, is_train=True)
 
-        batch_train = (rgb_train, sem_train)
-        loss = (E_opaque := 0.)
-        for plt_map, gt_train in zip(torch.tensor_split(rgb_map, n_palette, dim=-1), batch_train):
-            pix, opq = plt_map[..., :3], plt_map[..., 3:]
-            E_opaque += F.mse_loss(opq, self.ones.expand_as(opq), reduction='mean')
-            loss += F.mse_loss(pix, gt_train, reduction='mean')
+        rgb_map = torch.tensor_split(rgb_map, n_palette, dim=-1)
+        loss, E_opaque = zip(*map(self.plt_loss, rgb_map, batch_gt))
 
         # loss
-        total_loss = loss - E_opaque / 375
+        total_loss = sum(loss) - sum(E_opaque) / 375
+        loss = loss[0]
         if self.Ortho_reg_weight > 0:
             loss_reg = tensorf.vector_comp_diffs()
             total_loss += self.Ortho_reg_weight * loss_reg

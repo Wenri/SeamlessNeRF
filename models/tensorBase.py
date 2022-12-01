@@ -4,14 +4,14 @@ import numpy as np
 import torch
 import torch.nn
 import torch.nn.functional as F
+from einops import rearrange
 
 from .sh import eval_sh_bases
 
 
 def positional_encoding(positions, freqs):
     freq_bands = (2 ** torch.arange(freqs).float()).to(positions.device)  # (F,)
-    pts = (positions[..., None] * freq_bands).reshape(
-        positions.shape[:-1] + (freqs * positions.shape[-1],))  # (..., DF)
+    pts = rearrange(positions[..., None] * freq_bands, 'N D F -> N (D F)')  # (..., DF)
     pts = torch.cat([torch.sin(pts), torch.cos(pts)], dim=-1)
     return pts
 
@@ -372,7 +372,7 @@ class TensorBase(torch.nn.Module):
 
         print(f'Ray filtering done! takes {time.time() - tt} s. '
               f'ray mask ratio: {torch.count_nonzero(mask_filtered) / N}')
-        return mask_filtered
+        return mask_filtered.numpy()
 
     def feature2density(self, density_features):
         if self.fea2denseAct == "softplus":
