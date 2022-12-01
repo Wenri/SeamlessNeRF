@@ -26,11 +26,13 @@ class SimpleSampler:
     def __init__(self, train_dataset, batch):
         total = train_dataset.all_rays.shape[0]
         w, h = train_dataset.img_wh
+        rgb_shape = (train_dataset.all_sems.shape[0], h, w)
+        coord = torch.from_numpy(np.stack(np.unravel_index(np.arange(total), rgb_shape), axis=-1))
         self.dataset = train_dataset
         self.batch = batch
         self.curr = total
         self.ids = torch.randperm(total)
-        self.rgb_shape = (train_dataset.all_sems.shape[0], h, w)
+        self.all_sems = train_dataset.sample_sems(coord)
 
     def apply_filter(self, func, *args, **kwargs):
         mask_filtered = func(self.dataset.all_rays[self.ids], *args, **kwargs)
@@ -47,9 +49,8 @@ class SimpleSampler:
 
     def getbatch(self, device):
         ids = self.nextids()
-        coord = torch.from_numpy(np.stack(np.unravel_index(ids.numpy(), self.rgb_shape), axis=-1))
-        batch_sems = self.dataset.sample_sems_unsort(coord)
-        return self.dataset.all_rays[ids].to(device), self.dataset.all_rgbs[ids].to(device), batch_sems.to(device)
+        return self.dataset.all_rays[ids].to(device), self.dataset.all_rgbs[ids].to(device), \
+            self.all_sems[ids].to(device)
 
 
 class Trainer:
@@ -153,7 +154,7 @@ class Trainer:
 
         return tensorf
 
-    def train_one_epoch(self, tensorf, iteration, rays_train, rgb_train, sem_train):
+    def train_one_batch(self, tensorf, iteration, rays_train, rgb_train, sem_train):
         args = self.args
         white_bg = self.train_dataset.white_bg
         ndc_ray = args.ndc_ray
@@ -271,7 +272,7 @@ class Trainer:
         pbar = trange(args.n_iters, miniters=args.progress_refresh_rate, file=sys.stdout)
         for iteration in pbar:
             batch_train = self.trainingSampler.getbatch(device=self.device)
-            loss = self.train_one_epoch(tensorf, iteration, *batch_train)
+            loss = self.train_one_batch(tensorf, iteration, *batch_train)
 
             PSNRs.append(-10.0 * np.log(loss) / np.log(10.0))
             self.summary_writer.add_scalar('train/PSNR', PSNRs[-1], global_step=iteration)

@@ -147,21 +147,13 @@ class BlenderDataset(Dataset):
 
     def sample_sems(self, coord):
         half_wh = torch.tensor(self.img_wh, device=coord.device) / 2
-        rem_coord = torch.fliplr(coord[:, 1:]) / half_wh - 1
-        all_sems = []
-        for idx, cnt in zip(*torch.unique_consecutive(coord[:, 0], return_counts=True)):
-            sems = self.all_sems[idx]
-            sems = rearrange(sems, 'H W C -> 1 C H W').expand(cnt, -1, -1, -1)
-            coord = rearrange(rem_coord[:cnt], 'n pos -> n 1 1 pos')
-            sems = F.grid_sample(sems, coord, align_corners=True)
-            all_sems.append(rearrange(sems, 'n c 1 1 -> n c'))
-            rem_coord = rem_coord[cnt:]
-        return torch.cat(all_sems, 0)
-
-    def sample_sems_unsort(self, coord):
-        half_wh = torch.tensor(self.img_wh, device=coord.device) / 2
-        rem_coord = torch.fliplr(coord[:, 1:]) / half_wh - 1
-        all_sems = rearrange(self.all_sems[coord[:, 0]], 'N H W C -> N C H W')
-        coord = rearrange(rem_coord, 'n pos -> n 1 1 pos')
-        all_sems = F.grid_sample(all_sems, coord, align_corners=True)
-        return rearrange(all_sems, 'n c 1 1 -> n c')
+        coord, rem_coord = coord[:, 0], torch.fliplr(coord[:, 1:]) / half_wh - 1
+        all_sems = torch.empty(coord.shape[0], self.all_sems.shape[-1], device=coord.device)
+        for idx in torch.unique(coord):
+            mask = (coord == idx)
+            masked_coord = rearrange(rem_coord[mask], 'n pos -> n 1 1 pos')
+            sems = rearrange(self.all_sems[idx.item()], 'H W C -> 1 C H W').to(
+                device=coord.device).expand(masked_coord.shape[0], -1, -1, -1)
+            sems = F.grid_sample(sems, masked_coord, align_corners=True)
+            all_sems[mask] = rearrange(sems, 'n c 1 1 -> n c')
+        return all_sems
