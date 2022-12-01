@@ -24,26 +24,32 @@ from utils import convert_sdf_samples_to_ply, N_to_reso, cal_n_samples, TVLoss, 
 
 class SimpleSampler:
     def __init__(self, train_dataset, batch):
-        self.allrays, self.allrgbs = train_dataset.all_rays, train_dataset.all_rgbs
+        total = train_dataset.all_rays.shape[0]
+        w, h = train_dataset.img_wh
+        self.dataset = train_dataset
         self.batch = batch
-        self.curr = self.allrays.shape[0]
-        self.ids = None
+        self.curr = total
+        self.ids = torch.randperm(total)
+        self.rgb_shape = (train_dataset.all_sems.shape[0], h, w)
 
     def apply_filter(self, func, *args, **kwargs):
-        self.allrays, self.allrgbs = func(self.allrays, self.allrgbs, *args, **kwargs)
-        self.curr = self.allrays.shape[0]
+        mask_filtered = func(self.dataset.all_rays[self.ids], *args, **kwargs)
+        self.ids = self.ids[mask_filtered]
+        self.curr = self.ids.shape[0]
 
     def nextids(self):
-        total = self.allrays.shape[0]
+        total = self.ids.shape[0]
         self.curr += self.batch
         if self.curr + self.batch > total:
-            self.ids = torch.LongTensor(np.random.permutation(total))
+            self.ids = self.ids[torch.randperm(total)]
             self.curr = 0
         return self.ids[self.curr:self.curr + self.batch]
 
     def getbatch(self, device):
         ids = self.nextids()
-        return self.allrays[ids].to(device), self.allrgbs[ids].to(device)
+        coord = torch.from_numpy(np.stack(np.unravel_index(ids.numpy(), self.rgb_shape), axis=-1))
+        batch_sems = self.dataset.sample_sems_unsort(coord)
+        return self.dataset.all_rays[ids].to(device), self.dataset.all_rgbs[ids].to(device), batch_sems.to(device)
 
 
 class Trainer:
@@ -92,19 +98,6 @@ class Trainer:
         self.logger = logging.getLogger(type(self).__name__)
         self.ones = torch.ones((1, 1), device=self.device)
 
-    def sample_sems(self, coord):
-        half_wh = torch.tensor(self.train_dataset.img_wh, device=coord.device) / 2
-        rem_coord = torch.fliplr(coord[:, 1:]) / half_wh - 1
-        all_sems = []
-        for idx, cnt in zip(*torch.unique_consecutive(coord[:, 0], return_counts=True)):
-            sems = self.train_dataset.all_sems[idx]
-            sems = rearrange(torch.from_numpy(sems), 'H W C -> 1 C H W').expand(cnt, -1, -1, -1)
-            coord = rearrange(rem_coord[:cnt], 'n pos -> n 1 1 pos')
-            sems = F.grid_sample(sems, coord, align_corners=True)
-            all_sems.append(rearrange(sems, 'n c 1 1 -> n c'))
-            rem_coord = rem_coord[cnt:]
-        return torch.cat(all_sems, 0)
-
     def recon_with_palette(self, palette, points):
         hull = ConvexHull(palette)
         de = Delaunay(hull.points[hull.vertices].clip(0.0, 1.0))
@@ -132,7 +125,7 @@ class Trainer:
         else:
             fg = torch.ones(self.train_dataset.all_rgbs.shape[:-1], dtype=torch.bool)
         coord = rearrange(fg, '(n h w) -> n h w', h=h, w=w).nonzero()
-        rgbs = self.sample_sems(coord).to(device='cpu', dtype=torch.double).numpy()
+        rgbs = self.train_dataset.sample_sems(coord).to(device='cpu', dtype=torch.double).numpy()
         return sort_palette(rgbs, Hull_Simplification_old(rgbs, E_vertice_num=E_vertice_num, error_thres=1. / 256.))
 
     def build_network(self):
@@ -156,23 +149,27 @@ class Trainer:
                 density_shift=args.density_shift, distance_scale=args.distance_scale,
                 pos_pe=args.pos_pe, view_pe=args.view_pe, fea_pe=args.fea_pe,
                 featureC=args.featureC, step_ratio=args.step_ratio,
-                fea2denseAct=args.fea2denseAct, palette=self.palette)
+                fea2denseAct=args.fea2denseAct, palette=(self.palette, self.palette_sem))
 
         return tensorf
 
-    def train_one_epoch(self, tensorf, iteration, rays_train, rgb_train):
+    def train_one_epoch(self, tensorf, iteration, rays_train, rgb_train, sem_train):
         args = self.args
         white_bg = self.train_dataset.white_bg
         ndc_ray = args.ndc_ray
+        n_palette = getattr(tensorf.renderModule, 'n_palette', 1)
 
         # rgb_map, alphas_map, depth_map, weights, uncertainty
         rgb_map, alphas_map, depth_map, weights, uncertainty = self.renderer(
             rays_train, tensorf, chunk=args.batch_size, N_samples=self.nSamples, white_bg=white_bg,
             ndc_ray=ndc_ray, device=self.device, is_train=True)
 
-        rgb_map, E_opaque = rgb_map[..., :3], rgb_map[..., 3:]
-        E_opaque = F.mse_loss(E_opaque, self.ones.expand_as(E_opaque), reduction='mean')
-        loss = F.mse_loss(rgb_map, rgb_train, reduction='mean')
+        batch_train = (rgb_train, sem_train)
+        loss = (E_opaque := 0.)
+        for plt_map, gt_train in zip(torch.tensor_split(rgb_map, n_palette, dim=-1), batch_train):
+            pix, opq = plt_map[..., :3], plt_map[..., 3:]
+            E_opaque += F.mse_loss(opq, self.ones.expand_as(opq), reduction='mean')
+            loss += F.mse_loss(pix, gt_train, reduction='mean')
 
         # loss
         total_loss = loss - E_opaque / 375
@@ -273,8 +270,8 @@ class Trainer:
 
         pbar = trange(args.n_iters, miniters=args.progress_refresh_rate, file=sys.stdout)
         for iteration in pbar:
-            rays_train, rgb_train = self.trainingSampler.getbatch(device=self.device)
-            loss = self.train_one_epoch(tensorf, iteration, rays_train, rgb_train)
+            batch_train = self.trainingSampler.getbatch(device=self.device)
+            loss = self.train_one_epoch(tensorf, iteration, *batch_train)
 
             PSNRs.append(-10.0 * np.log(loss) / np.log(10.0))
             self.summary_writer.add_scalar('train/PSNR', PSNRs[-1], global_step=iteration)

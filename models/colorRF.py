@@ -1,4 +1,4 @@
-from .render import PLTRender
+from .render import PLTRender, MultiplePLTRender
 from .tensoRF import TensorVMSplit
 
 
@@ -8,5 +8,7 @@ class ColorVMSplit(TensorVMSplit):
         match shadingMode:
             case 'PLT_Fea':
                 return PLTRender(self.app_dim, view_pe, fea_pe, featureC, palette).to(self.device)
+            case 'PLT_Fea_Multi':
+                return MultiplePLTRender(self.app_dim, view_pe, fea_pe, featureC, *palette).to(self.device)
             case _:
                 return super().init_render_func(shadingMode, pos_pe, view_pe, fea_pe, featureC, **kwargs)

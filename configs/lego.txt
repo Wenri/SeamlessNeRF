@@ -21,7 +21,7 @@ n_lamb_sh = [48,48,48]
 model_name = ColorVMSplit
 
 
-shadingMode = PLT_Fea
+shadingMode = PLT_Fea_Multi
 fea2denseAct = softplus
 
 view_pe = 2

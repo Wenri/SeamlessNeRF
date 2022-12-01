@@ -342,7 +342,7 @@ class TensorBase(torch.nn.Module):
         return new_aabb
 
     @torch.no_grad()
-    def filtering_rays(self, all_rays, all_rgbs, N_samples=256, chunk=10240 * 5, bbox_only=False):
+    def filtering_rays(self, all_rays, N_samples=256, chunk=10240 * 5, bbox_only=False):
         print('========> filtering rays ...')
         tt = time.time()
 
@@ -368,10 +368,11 @@ class TensorBase(torch.nn.Module):
 
             mask_filtered.append(mask_inbbox.cpu())
 
-        mask_filtered = torch.cat(mask_filtered).view(all_rgbs.shape[:-1])
+        mask_filtered = torch.cat(mask_filtered).view(all_rays.shape[:-1])
 
-        print(f'Ray filtering done! takes {time.time() - tt} s. ray mask ratio: {torch.sum(mask_filtered) / N}')
-        return all_rays[mask_filtered], all_rgbs[mask_filtered]
+        print(f'Ray filtering done! takes {time.time() - tt} s. '
+              f'ray mask ratio: {torch.count_nonzero(mask_filtered) / N}')
+        return mask_filtered
 
     def feature2density(self, density_features):
         if self.fea2denseAct == "softplus":

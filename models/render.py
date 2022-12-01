@@ -11,11 +11,10 @@ class PLTRender(torch.nn.Module):
         self.in_mlpC = 2 * viewpe * 3 + 2 * feape * inChanel + 3 + inChanel
         self.viewpe = viewpe
         self.feape = feape
-        self.n_palette = len(palette)
-        self.n_dim = 3 + self.n_palette - 1
+        self.n_dim = 3 + (len_palette := len(palette)) - 1
         layer1 = torch.nn.Linear(self.in_mlpC, featureC)
         layer2 = torch.nn.Linear(featureC, featureC)
-        layer3 = torch.nn.Linear(featureC, self.n_palette - 1)
+        layer3 = torch.nn.Linear(featureC, len_palette - 1)
         torch.nn.init.constant_(layer3.bias, 0)
         self.register_buffer('palette', torch.as_tensor(palette, dtype=torch.float32), persistent=False)
 
@@ -44,3 +43,13 @@ class PLTRender(torch.nn.Module):
         logits = self.mlp(torch.cat(indata, dim=-1))
         rgb, opaque = self.rgb_from_palette_rev(logits)
         return torch.cat((rgb, opaque), dim=-1)
+
+
+class MultiplePLTRender(torch.nn.ModuleList):
+    def __init__(self, inChanel, viewpe=6, feape=6, featureC=128, *palettes):
+        super().__init__(PLTRender(inChanel, viewpe, feape, featureC, palette) for palette in palettes)
+        self.n_dim = sum(render.n_dim for render in self)
+        self.n_palette = len(palettes)
+
+    def forward(self, pts, viewdirs, features):
+        return torch.cat([render(pts, viewdirs, features) for render in self], dim=-1)

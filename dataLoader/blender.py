@@ -3,6 +3,7 @@ import os
 
 from PIL import Image
 from einops import rearrange
+from torch.nn import functional as F
 from torch.utils.data import Dataset
 from torchvision import transforms as T
 from tqdm import tqdm
@@ -112,6 +113,7 @@ class BlenderDataset(Dataset):
             self.all_sems -= np.min(self.all_sems, axis=0)
             self.all_sems /= np.max(self.all_sems, axis=0)
             self.all_sems = rearrange(self.all_sems, '(N H W) C -> N H W C', **vgg.target_size._asdict())
+            self.all_sems = torch.from_numpy(self.all_sems)
 
     def define_transforms(self):
         self.transform = T.ToTensor()
@@ -142,3 +144,24 @@ class BlenderDataset(Dataset):
                       'rgbs': img,
                       'mask': mask}
         return sample
+
+    def sample_sems(self, coord):
+        half_wh = torch.tensor(self.img_wh, device=coord.device) / 2
+        rem_coord = torch.fliplr(coord[:, 1:]) / half_wh - 1
+        all_sems = []
+        for idx, cnt in zip(*torch.unique_consecutive(coord[:, 0], return_counts=True)):
+            sems = self.all_sems[idx]
+            sems = rearrange(sems, 'H W C -> 1 C H W').expand(cnt, -1, -1, -1)
+            coord = rearrange(rem_coord[:cnt], 'n pos -> n 1 1 pos')
+            sems = F.grid_sample(sems, coord, align_corners=True)
+            all_sems.append(rearrange(sems, 'n c 1 1 -> n c'))
+            rem_coord = rem_coord[cnt:]
+        return torch.cat(all_sems, 0)
+
+    def sample_sems_unsort(self, coord):
+        half_wh = torch.tensor(self.img_wh, device=coord.device) / 2
+        rem_coord = torch.fliplr(coord[:, 1:]) / half_wh - 1
+        all_sems = rearrange(self.all_sems[coord[:, 0]], 'N H W C -> N C H W')
+        coord = rearrange(rem_coord, 'n pos -> n 1 1 pos')
+        all_sems = F.grid_sample(all_sems, coord, align_corners=True)
+        return rearrange(all_sems, 'n c 1 1 -> n c')
