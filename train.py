@@ -171,11 +171,12 @@ class Trainer:
             ndc_ray=ndc_ray, device=self.device, is_train=True)
 
         rgb_map = torch.tensor_split(rgb_map, n_palette, dim=-1)
+        # batch_gt = (batch_gt[0],)
         loss, E_opaque = zip(*map(self.plt_loss, rgb_map, batch_gt))
 
         # loss
         total_loss = sum(loss) - sum(E_opaque) / 375
-        loss = loss[0]
+        loss, *_ = loss
         if self.Ortho_reg_weight > 0:
             loss_reg = tensorf.vector_comp_diffs()
             total_loss += self.Ortho_reg_weight * loss_reg
@@ -294,11 +295,14 @@ class Trainer:
                 PSNRs = []
 
             if iteration % args.vis_every == args.vis_every - 1 and args.N_vis != 0:
-                savePath = Path(self.summary_writer.log_dir, 'imgs_vis')
-                PSNRs_test = evaluation(self.test_dataset, tensorf, args, self.renderer, os.fspath(savePath),
-                                        N_vis=args.N_vis, prtx=f'{iteration:06d}_', N_samples=self.nSamples,
-                                        white_bg=white_bg, ndc_ray=args.ndc_ray, compute_extra_metrics=False)
-                self.summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
+                try:
+                    savePath = Path(self.summary_writer.log_dir, 'imgs_vis')
+                    PSNRs_test = evaluation(self.test_dataset, tensorf, args, self.renderer, os.fspath(savePath),
+                                            N_vis=args.N_vis, prtx=f'{iteration:06d}_', N_samples=self.nSamples,
+                                            white_bg=white_bg, ndc_ray=args.ndc_ray, compute_extra_metrics=False)
+                    self.summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
+                except Exception as e:
+                    self.logger.warning(f'Evaluation failed: {e}')
 
             self.update_grid_resolution(tensorf, iteration)
 

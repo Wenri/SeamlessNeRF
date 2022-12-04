@@ -38,6 +38,7 @@ class BlenderDataset(Dataset):
         depth = np.array(read_pfm(filename)[0], dtype=np.float32)  # (800, 800)
         return depth
 
+    @torch.no_grad()
     def read_meta(self):
         if self.split == 'train':
             vgg = VGGSemantic()
@@ -145,6 +146,7 @@ class BlenderDataset(Dataset):
                       'mask': mask}
         return sample
 
+    @torch.no_grad()
     def sample_sems(self, coord):
         half_wh = torch.tensor(self.img_wh, device=coord.device) / 2
         coord, rem_coord = coord[:, 0], torch.fliplr(coord[:, 1:]) / half_wh - 1
@@ -156,4 +158,5 @@ class BlenderDataset(Dataset):
                 device=coord.device).expand(masked_coord.shape[0], -1, -1, -1)
             sems = F.grid_sample(sems, masked_coord, align_corners=True)
             all_sems[mask] = rearrange(sems, 'n c 1 1 -> n c')
+        all_sems.detach_()
         return all_sems

@@ -30,6 +30,19 @@ def OctreeRender_trilinear_fast(rays, tensorf, chunk=4096, N_samples=-1, ndc_ray
     return torch.cat(rgbs), None, torch.cat(depth_maps), None, None
 
 
+def visualize_palette(depth_map, rgb_map, opaque, palette, savePath, prtx):
+    opaque = opaque[..., None] * palette[:opaque.shape[0]]
+    rgb_map = (rgb_map.numpy() * 255).astype('uint8')
+
+    if savePath is not None:
+        imageio.imwrite(savePath / f'{prtx}.png', rgb_map)
+        rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
+        imageio.imwrite(savePath / 'rgbd' / f'{prtx}.png', rgb_map)
+        for j, opq_map in enumerate(torch.split(opaque, 1, dim=2)):
+            opq_map = (opq_map.cpu().squeeze(dim=2).numpy() * 255).astype('uint8')
+            imageio.imwrite(savePath / 'palette' / f'{prtx}_{j}.png', opq_map)
+
+
 @torch.no_grad()
 def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, prtx='', N_samples=-1,
                white_bg=False, ndc_ray=False, compute_extra_metrics=True, device='cuda'):
@@ -39,7 +52,13 @@ def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, pr
     os.makedirs(os.path.join(savePath, "rgbd"), exist_ok=True)
     os.makedirs(os.path.join(savePath, "palette"), exist_ok=True)
     savePath = Path(savePath)
-    palette = getattr(tensorf.renderModule, 'palette')
+    n_palette = getattr(tensorf.renderModule, 'n_palette', 1)
+    if n_palette > 1:
+        palette = [render.palette for render in tensorf.renderModule]
+        plt_names = tensorf.renderModule.PLT_NAMES
+    else:
+        palette = [getattr(tensorf.renderModule, 'palette')]
+        plt_names = ('RGB',)
 
     try:
         tqdm._instances.clear()
@@ -54,12 +73,9 @@ def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, pr
         W, H = test_dataset.img_wh
         rays = samples.view(-1, samples.shape[-1])
 
-        rgb_map, _, depth_map, _, _ = renderer(rays, tensorf, chunk=4096, N_samples=N_samples,
+        plt_map, _, depth_map, _, _ = renderer(rays, tensorf, chunk=4096, N_samples=N_samples,
                                                ndc_ray=ndc_ray, white_bg=white_bg, device=device)
-        opaque = rgb_map[..., 3:]
-        rgb_map = rgb_map[..., :3].clamp(0.0, 1.0)
-
-        opaque = rearrange(opaque, '(h w) c-> h w c', h=H, w=W)
+        rgb_map = plt_map[..., :3].clamp(0.0, 1.0)
         rgb_map, depth_map = rgb_map.reshape(H, W, 3).cpu(), depth_map.reshape(H, W).cpu()
 
         depth_map, _ = visualize_depth_numpy(depth_map.numpy(), near_far)
@@ -76,18 +92,13 @@ def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, pr
                 l_alex.append(l_a)
                 l_vgg.append(l_v)
 
-        opaque = opaque[..., None] * palette[:5]
-        rgb_map = (rgb_map.numpy() * 255).astype('uint8')
-        # rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
         rgb_maps.append(rgb_map)
         depth_maps.append(depth_map)
-        if savePath is not None:
-            imageio.imwrite(savePath / f'{prtx}{idx:03d}.png', rgb_map)
-            rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
-            imageio.imwrite(savePath / 'rgbd' / f'{prtx}{idx:03d}.png', rgb_map)
-            for j, opq_map in enumerate(torch.split(opaque, 1, dim=2)):
-                opq_map = (opq_map.cpu().squeeze(dim=2).numpy() * 255).astype('uint8')
-                imageio.imwrite(savePath / 'palette' / f'{prtx}{idx:03d}_{j}.png', opq_map)
+
+        for rgb_map, plt, name in zip(torch.tensor_split(plt_map, n_palette, dim=-1), palette, plt_names):
+            opaque = rearrange(rgb_map[..., 3:], '(h w) c-> h w c', h=H, w=W)
+            rgb_map = rgb_map[..., :3].clamp(0.0, 1.0).reshape(H, W, 3).cpu()
+            visualize_palette(depth_map, rgb_map, opaque, plt, savePath, f'{prtx}{idx:03d}_{name}')
 
     fps = min(len(rgb_maps) / 5, 30)
     imageio.mimwrite(savePath / f'{prtx}video.mp4', np.stack(rgb_maps), fps=fps, quality=10)
