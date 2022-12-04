@@ -62,6 +62,7 @@ def config_parser(cmd=None):
     parser.add_argument("--view_pe", type=int, default=6, help='number of pe for view')
     parser.add_argument("--fea_pe", type=int, default=6, help='number of pe for features')
     parser.add_argument("--featureC", type=int, default=128, help='hidden feature channel in MLP')
+    parser.add_argument("--semantic_type", type=str, default='vgg', help='semantic_type')
 
     parser.add_argument("--ckpt", type=str, default=None,
                         help='specific weights npy file to reload for coarse network')

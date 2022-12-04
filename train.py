@@ -26,7 +26,7 @@ class SimpleSampler:
     def __init__(self, train_dataset, batch):
         total = train_dataset.all_rays.shape[0]
         w, h = train_dataset.img_wh
-        self.rgb_shape = (train_dataset.all_sems.shape[0], h, w)
+        self.rgb_shape = (train_dataset.all_sems.shape[0], h, w) if len(train_dataset.all_sems) else None
         self.dataset = train_dataset
         self.batch = batch
         self.curr = total
@@ -47,9 +47,12 @@ class SimpleSampler:
 
     def getbatch(self, device):
         ids = self.nextids()
-        sems = torch.from_numpy(np.stack(np.unravel_index(ids, self.rgb_shape), axis=-1)).to(device)
-        sems = self.dataset.sample_sems(sems)
-        return self.dataset.all_rays[ids].to(device), self.dataset.all_rgbs[ids].to(device), sems
+        if self.rgb_shape is not None:
+            sems = torch.from_numpy(np.stack(np.unravel_index(ids, self.rgb_shape), axis=-1)).to(device)
+            sems = self.dataset.sample_sems(sems)
+            return self.dataset.all_rays[ids].to(device), self.dataset.all_rgbs[ids].to(device), sems
+        else:
+            return self.dataset.all_rays[ids].to(device), self.dataset.all_rgbs[ids].to(device)
 
 
 class Trainer:
@@ -59,7 +62,8 @@ class Trainer:
 
         # init dataset
         dataset = dataset_dict[args.dataset_name]
-        self.train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False)
+        self.train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False,
+                                     semantic_type=args.semantic_type)
         self.test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True)
 
         # init parameters
@@ -69,9 +73,11 @@ class Trainer:
         self.reso_mask = None
         self.nSamples = min(args.nSamples, cal_n_samples(self.reso_cur, args.step_ratio))
         self.palette = self.build_palette(args.datadir)
-        self.palette_sem = self.build_sem_palette(len(self.palette))
-
-        print(self.palette_sem)
+        if len(self.train_dataset.all_sems):
+            self.palette_sem = self.build_sem_palette(len(self.palette))
+            print(self.palette_sem)
+        else:
+            self.palette_sem = None
 
         # linear in logrithmic space
         self.N_voxel_list = torch.round(torch.exp(torch.linspace(
@@ -133,7 +139,9 @@ class Trainer:
         n_lamb_sigma = args.n_lamb_sigma
         n_lamb_sh = args.n_lamb_sh
         near_far = self.train_dataset.near_far
-
+        palette = self.palette
+        if self.palette_sem is not None:
+            palette = (palette, self.palette_sem)
         if args.ckpt is not None:
             ckpt = torch.load(args.ckpt, map_location=self.device)
             kwargs = ckpt['kwargs']
@@ -149,7 +157,7 @@ class Trainer:
                 density_shift=args.density_shift, distance_scale=args.distance_scale,
                 pos_pe=args.pos_pe, view_pe=args.view_pe, fea_pe=args.fea_pe,
                 featureC=args.featureC, step_ratio=args.step_ratio,
-                fea2denseAct=args.fea2denseAct, palette=(self.palette, self.palette_sem))
+                fea2denseAct=args.fea2denseAct, palette=palette)
 
         return tensorf
 

@@ -13,7 +13,7 @@ from .semantic_helper import VGGSemantic, PCASemantic
 
 
 class BlenderDataset(Dataset):
-    def __init__(self, datadir, split='train', downsample=1.0, is_stack=False, N_vis=-1):
+    def __init__(self, datadir, split='train', downsample=1.0, is_stack=False, N_vis=-1, semantic_type='vgg'):
 
         self.N_vis = N_vis
         self.root_dir = datadir
@@ -24,7 +24,7 @@ class BlenderDataset(Dataset):
 
         self.scene_bbox = torch.tensor(((-1.5, -1.5, -1.5), (1.5, 1.5, 1.5)))
         self.blender2opencv = np.array(((1, 0, 0, 0), (0, -1, 0, 0), (0, 0, -1, 0), (0, 0, 0, 1)))
-        self.read_meta()
+        self.read_meta(semantic_type)
         self.define_proj_mat()
 
         self.white_bg = True
@@ -39,8 +39,8 @@ class BlenderDataset(Dataset):
         return depth
 
     @torch.no_grad()
-    def read_meta(self):
-        if self.split == 'train':
+    def read_meta(self, semantic_type):
+        if self.split == 'train' and semantic_type and semantic_type != 'None':
             vgg = VGGSemantic()
             vgg.cuda()
             vgg.eval()
