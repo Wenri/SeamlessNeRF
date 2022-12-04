@@ -64,7 +64,8 @@ class Trainer:
         dataset = dataset_dict[args.dataset_name]
         self.train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False,
                                      semantic_type=args.semantic_type)
-        self.test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True)
+        self.test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True,
+                                    pca=self.train_dataset.pca)
 
         # init parameters
         # tensorVM, renderer = init_parameters(args, train_dataset.scene_bbox.to(device), reso_list[0])
@@ -161,11 +162,11 @@ class Trainer:
 
         return tensorf
 
-    def plt_loss(self, plt_map, gt_train):
+    def plt_loss(self, plt_map, gt_train, weight=1.):
         pix, opq = plt_map[..., :3], plt_map[..., 3:]
         E_opaque = F.mse_loss(opq, self.ones.expand_as(opq), reduction='mean')
         loss = F.mse_loss(pix, gt_train, reduction='mean')
-        return loss, E_opaque
+        return loss * weight, E_opaque * weight
 
     def train_one_batch(self, tensorf, iteration, rays_train, *batch_gt):
         args = self.args
@@ -180,7 +181,8 @@ class Trainer:
 
         rgb_map = torch.tensor_split(rgb_map, n_palette, dim=-1)
         # batch_gt = (batch_gt[0],)
-        loss, E_opaque = zip(*map(self.plt_loss, rgb_map, batch_gt))
+        loss_weight = (1., 0.1)
+        loss, E_opaque = zip(*map(self.plt_loss, rgb_map, batch_gt, loss_weight))
 
         # loss
         total_loss = sum(loss) - sum(E_opaque) / 375

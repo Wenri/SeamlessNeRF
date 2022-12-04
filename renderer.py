@@ -31,7 +31,7 @@ def OctreeRender_trilinear_fast(rays, tensorf, chunk=4096, N_samples=-1, ndc_ray
 
 
 def visualize_palette(depth_map, rgb_map, opaque, palette, savePath, prtx):
-    opaque = opaque[..., None] * palette[:opaque.shape[0]]
+    opaque = opaque[..., None] * palette[:opaque.shape[-1]]
     rgb_map = (rgb_map.numpy() * 255).astype('uint8')
 
     if savePath is not None:
@@ -77,10 +77,11 @@ def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, pr
                                                ndc_ray=ndc_ray, white_bg=white_bg, device=device)
         rgb_map = plt_map[..., :3].clamp(0.0, 1.0)
         rgb_map, depth_map = rgb_map.reshape(H, W, 3).cpu(), depth_map.reshape(H, W).cpu()
+        gt_vis = []
 
-        depth_map, _ = visualize_depth_numpy(depth_map.numpy(), near_far)
         if len(test_dataset.all_rgbs):
             gt_rgb = test_dataset.all_rgbs[idxs[idx]].view(H, W, 3)
+            gt_vis.append(gt_rgb)
             loss = torch.mean((rgb_map - gt_rgb) ** 2)
             PSNRs.append(-10.0 * np.log(loss.item()) / np.log(10.0))
 
@@ -92,7 +93,18 @@ def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, pr
                 l_alex.append(l_a)
                 l_vgg.append(l_v)
 
-        rgb_maps.append(rgb_map)
+        if len(test_dataset.all_sems):
+            c1, c2 = torch.ones(test_dataset.all_rgbs.shape[1:-1], dtype=torch.bool).nonzero(as_tuple=True)
+            c0 = torch.full_like(c1, idxs[idx])
+            coord = torch.stack((c0, c1, c2), dim=-1)
+            gt_sem = test_dataset.sample_sems(coord).view(H, W, 3)
+            gt_vis.append(gt_sem)
+
+        gt_vis = (torch.cat(gt_vis, dim=1).numpy() * 255).astype('uint8')
+        imageio.imwrite(savePath / f'{prtx}{idx:03d}_GT.png', gt_vis)
+
+        rgb_maps.append((rgb_map.numpy() * 255).astype('uint8'))
+        depth_map, _ = visualize_depth_numpy(depth_map.numpy(), near_far)
         depth_maps.append(depth_map)
 
         for rgb_map, plt, name in zip(torch.tensor_split(plt_map, n_palette, dim=-1), palette, plt_names):

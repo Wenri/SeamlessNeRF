@@ -13,8 +13,8 @@ from .semantic_helper import VGGSemantic, PCASemantic
 
 
 class BlenderDataset(Dataset):
-    def __init__(self, datadir, split='train', downsample=1.0, is_stack=False, N_vis=-1, semantic_type='vgg'):
-
+    def __init__(self, datadir, split='train', downsample=1.0, is_stack=False, N_vis=-1, semantic_type='vgg', pca=None):
+        self.pca = pca
         self.N_vis = N_vis
         self.root_dir = datadir
         self.split = split
@@ -40,7 +40,7 @@ class BlenderDataset(Dataset):
 
     @torch.no_grad()
     def read_meta(self, semantic_type):
-        if self.split == 'train' and semantic_type and semantic_type != 'None':
+        if semantic_type and semantic_type != 'None':  # and self.split == 'train'
             vgg = VGGSemantic()
             vgg.cuda()
             vgg.eval()
@@ -89,7 +89,14 @@ class BlenderDataset(Dataset):
 
             if vgg:
                 with torch.no_grad():
-                    self.all_sems.append(rearrange(vgg(img.cuda()), 'N C H W -> N H W C').cpu())
+                    sem = rearrange(vgg(img.cuda()), 'N C H W -> N H W C').cpu()
+                if self.pca:
+                    sem = self.pca.transform(rearrange(sem, 'N H W C -> (N H W) C').numpy())
+                    sem -= self.pca.sem_bias
+                    sem /= self.pca.sem_scale
+                    sem = rearrange(sem, '(N H W) C -> N H W C', **vgg.target_size._asdict())
+                    sem = torch.from_numpy(sem)
+                self.all_sems.append(sem)
 
             img = rearrange(img, 'c h w -> (h w) c')  # RGBA
             self.all_rgbs += [img]
@@ -107,12 +114,15 @@ class BlenderDataset(Dataset):
             self.all_rgbs = torch.stack(
                 self.all_rgbs, 0).reshape(-1, *self.img_wh[::-1], 3)  # (len(self.meta['frames]),h,w,3)
             # self.all_masks = torch.stack(self.all_masks, 0).reshape(-1,*self.img_wh[::-1])  # (len(self.meta['frames]),h,w,3)
-        if vgg:
+        if len(self.all_sems):
             self.all_sems = torch.cat(self.all_sems, 0)
-            self.all_sems = PCASemantic(self).build_semantic().transform(
-                rearrange(self.all_sems, 'N H W C -> (N H W) C').numpy())
-            self.all_sems -= np.min(self.all_sems, axis=0)
-            self.all_sems /= np.max(self.all_sems, axis=0)
+        if vgg and self.pca is None:
+            self.pca = PCASemantic(self).build_semantic()
+            self.all_sems = self.pca.transform(rearrange(self.all_sems, 'N H W C -> (N H W) C').numpy())
+            self.pca.sem_bias = np.min(self.all_sems, axis=0)
+            self.all_sems -= self.pca.sem_bias
+            self.pca.sem_scale = np.max(self.all_sems, axis=0)
+            self.all_sems /= self.pca.sem_scale
             self.all_sems = rearrange(self.all_sems, '(N H W) C -> N H W C', **vgg.target_size._asdict())
             self.all_sems = torch.from_numpy(self.all_sems)
 
