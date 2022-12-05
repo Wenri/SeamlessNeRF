@@ -44,7 +44,7 @@ class VGGSemantic(nn.Module):
                 if out.shape[-2:] != self.target_size:
                     out = F.interpolate(out, self.target_size, mode='nearest')
                 x.append(out)
-        return torch.cat(x, dim=1)
+        return torch.cat(x[:2], dim=1)
 
 
 class PCASemantic:
