@@ -65,7 +65,7 @@ class Trainer:
         self.train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False,
                                      semantic_type=args.semantic_type)
         self.test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True,
-                                    pca=self.train_dataset.pca)
+                                    semantic_type=args.semantic_type, pca=self.train_dataset.pca)
 
         # init parameters
         # tensorVM, renderer = init_parameters(args, train_dataset.scene_bbox.to(device), reso_list[0])
@@ -135,21 +135,35 @@ class Trainer:
         rgbs = self.train_dataset.sample_sems(coord).to(device='cpu', dtype=torch.double).numpy()
         return sort_palette(rgbs, Hull_Simplification_old(rgbs, E_vertice_num=E_vertice_num, error_thres=1. / 256.))
 
+    def pick_palette(self, root=None):
+        from tkcolorpicker import askcolor
+        if root is None:
+            import tkinter as tk
+            import tkinter.ttk as ttk
+            root = tk.Tk()
+            style = ttk.Style(root)
+            style.theme_use('clam')
+        palette = (np.asarray(self.palette) * 255).astype(np.uint8)
+        palette = [askcolor(p.tolist(), root)[0] for p in palette]
+        palette = np.asarray(palette) / 255.
+        return [tuple(p) for p in palette.tolist()]
+
     def build_network(self):
         args = self.args
         n_lamb_sigma = args.n_lamb_sigma
         n_lamb_sh = args.n_lamb_sh
         near_far = self.train_dataset.near_far
-        palette = self.palette
-        if self.palette_sem is not None:
-            palette = (palette, self.palette_sem)
         if args.ckpt is not None:
             ckpt = torch.load(args.ckpt, map_location=self.device)
             kwargs = ckpt['kwargs']
-            kwargs.update({'device': self.device})
+            kwargs.update({'device': self.device,
+                           'palette': self.pick_palette()})
             tensorf = MODEL_ZOO[args.model_name](**kwargs)
             tensorf.load(ckpt)
         else:
+            palette = self.palette
+            if self.palette_sem is not None:
+                palette = (palette, self.palette_sem)
             tensorf = MODEL_ZOO[args.model_name](
                 self.aabb, self.reso_cur, self.device,
                 density_n_comp=n_lamb_sigma, appearance_n_comp=n_lamb_sh,
