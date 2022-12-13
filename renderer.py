@@ -110,7 +110,7 @@ def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, pr
         for rgb_map, plt, name in zip(torch.tensor_split(plt_map, n_palette, dim=-1), palette, plt_names):
             opaque = rearrange(rgb_map[..., 3:], '(h w) c-> h w c', h=H, w=W)
             rgb_map = rgb_map[..., :3].clamp(0.0, 1.0).reshape(H, W, 3).cpu()
-            visualize_palette(depth_map, rgb_map, opaque, plt, savePath, f'{prtx}{idx:03d}_{name}')
+            visualize_palette(depth_map, rgb_map, opaque, plt.T, savePath, f'{prtx}{idx:03d}_{name}')
 
     fps = min(len(rgb_maps) / 5, 30)
     imageio.mimwrite(savePath / f'{prtx}video.mp4', np.stack(rgb_maps), fps=fps, quality=10)
