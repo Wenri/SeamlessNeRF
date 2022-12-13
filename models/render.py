@@ -16,7 +16,8 @@ class PLTRender(torch.nn.Module):
         layer2 = torch.nn.Linear(featureC, featureC)
         layer3 = torch.nn.Linear(featureC, len_palette - 1)
         torch.nn.init.constant_(layer3.bias, 0)
-        self.register_buffer('palette', torch.as_tensor(palette, dtype=torch.float32), persistent=False)
+        palette = torch.as_tensor(palette, dtype=torch.float32)
+        self.register_parameter('palette', torch.nn.Parameter(palette.T, requires_grad=True))
 
         self.mlp = torch.nn.Sequential(layer1, torch.nn.LeakyReLU(inplace=True),
                                        layer2, torch.nn.LeakyReLU(inplace=True),
@@ -32,7 +33,7 @@ class PLTRender(torch.nn.Module):
         bary_coord = torch.cat((w_0, w_a, w_last), dim=-1)
         # bary_coord guarantee sum .eq. 1
         # assert torch.allclose(bary_coord.sum(dim=-1), torch.ones(()), atol=1e-3)
-        return bary_coord @ self.palette, opaque
+        return F.linear(bary_coord, self.palette), opaque
 
     def forward(self, pts, viewdirs, features):
         indata = [features, viewdirs]
