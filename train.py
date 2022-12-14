@@ -73,7 +73,9 @@ class Trainer:
         self.reso_cur = N_to_reso(args.N_voxel_init, self.aabb)
         self.reso_mask = None
         self.nSamples = min(args.nSamples, cal_n_samples(self.reso_cur, args.step_ratio))
-        self.palette = self.build_palette(args.datadir)
+        self.palette, hull_vertices = self.build_palette(args.datadir)
+        self.hull = ConvexHull(hull_vertices)
+        self.de = Delaunay(hull_vertices)
         if len(self.train_dataset.all_sems):
             self.palette_sem = self.build_sem_palette(len(self.palette))
             print(self.palette_sem)
@@ -122,8 +124,9 @@ class Trainer:
             fg = torch.lt(rgbs, 1.).any(dim=-1)
             rgbs = rgbs[fg]
         rgbs = rgbs.to(device='cpu', dtype=torch.double).numpy()
+        hull = ConvexHull(rgbs)
         return sort_palette(rgbs, Hull_Simplification_determined_version(
-            rgbs, filepath.stem + "-convexhull_vertices", error_thres=1. / 256.))
+            rgbs, filepath.stem + "-convexhull_vertices", error_thres=1. / 256.)), hull.points[hull.vertices]
 
     def build_sem_palette(self, E_vertice_num=10):
         w, h = self.train_dataset.img_wh
@@ -176,10 +179,21 @@ class Trainer:
 
         return tensorf
 
-    def plt_loss(self, plt_map, gt_train, weight=1.):
+    def outsidehull_points_distance(self, inp_points):
+        points = inp_points.detach().to('cpu', dtype=torch.double, copy=True).numpy()
+        ind = self.de.find_simplex(points, tol=1e-8)
+        for i in np.nonzero(ind < 0)[0]:
+            dist_list = [_DCP_PT_RET(**DCPPointTriangle(points[i], self.hull.points[j])) for j in self.hull.simplices]
+            idx = np.fromiter((j.distance for j in dist_list), dtype=np.float_, count=len(dist_list)).argmin()
+            points[i] = dist_list[idx].closest
+        points = torch.from_numpy(points).to(inp_points.device, dtype=inp_points.dtype)
+        return F.mse_loss(inp_points, points, reduction='mean')
+
+    def plt_loss(self, plt_map, gt_train, palette, weight=1.):  # palette in 3xN
         pix, opq = plt_map[..., :3], plt_map[..., 3:]
         E_opaque = F.mse_loss(opq, self.ones.expand_as(opq), reduction='mean')
         loss = F.mse_loss(pix, gt_train, reduction='mean')
+        E_opaque = E_opaque + 1e3 * self.outsidehull_points_distance(palette.T)
         return loss * weight, E_opaque * weight
 
     def train_one_batch(self, tensorf, iteration, rays_train, *batch_gt):
@@ -187,6 +201,8 @@ class Trainer:
         white_bg = self.train_dataset.white_bg
         ndc_ray = args.ndc_ray
         n_palette = getattr(tensorf.renderModule, 'n_palette', 1)
+        palette = (render.palette for render in tensorf.renderModule
+                   ) if n_palette > 1 else (getattr(tensorf.renderModule, 'palette'),)
 
         # rgb_map, alphas_map, depth_map, weights, uncertainty
         rgb_map, alphas_map, depth_map, weights, uncertainty = self.renderer(
@@ -196,7 +212,7 @@ class Trainer:
         rgb_map = torch.tensor_split(rgb_map, n_palette, dim=-1)
         # batch_gt = (batch_gt[0],)
         loss_weight = (1., 0.1)
-        loss, E_opaque = zip(*map(self.plt_loss, rgb_map, batch_gt, loss_weight))
+        loss, E_opaque = zip(*map(self.plt_loss, rgb_map, batch_gt, palette, loss_weight))
 
         # loss
         total_loss = sum(loss) - sum(E_opaque) / 375
