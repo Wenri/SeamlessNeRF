@@ -193,7 +193,7 @@ class Trainer:
         pix, opq = plt_map[..., :3], plt_map[..., 3:]
         E_opaque = F.mse_loss(opq, self.ones.expand_as(opq), reduction='mean')
         loss = F.mse_loss(pix, gt_train, reduction='mean')
-        E_opaque = E_opaque + 1e3 * self.outsidehull_points_distance(palette.T)
+        E_opaque = E_opaque - 1e3 * self.outsidehull_points_distance(palette.T)
         return loss * weight, E_opaque * weight
 
     def train_one_batch(self, tensorf, iteration, rays_train, *batch_gt):
