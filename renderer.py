@@ -41,6 +41,8 @@ def visualize_palette(depth_map, rgb_map, opaque, palette, savePath, prtx):
         for j, opq_map in enumerate(torch.split(opaque, 1, dim=2)):
             opq_map = (opq_map.cpu().squeeze(dim=2).numpy() * 255).astype('uint8')
             imageio.imwrite(savePath / 'palette' / f'{prtx}_{j}.png', opq_map)
+        bg = rearrange(palette[-1].cpu() * 255, 'c -> 1 1 c').expand(*opaque.shape[:2], -1).to(torch.uint8).numpy()
+        imageio.imwrite(savePath / 'palette' / f'{prtx}_BG.png', bg)
 
 
 @torch.no_grad()

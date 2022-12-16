@@ -187,13 +187,14 @@ class Trainer:
             idx = np.fromiter((j.distance for j in dist_list), dtype=np.float_, count=len(dist_list)).argmin()
             points[i] = dist_list[idx].closest
         points = torch.from_numpy(points).to(inp_points.device, dtype=inp_points.dtype)
-        return F.mse_loss(inp_points, points, reduction='mean')
+        return F.mse_loss(inp_points, points, reduction='sum')
 
     def plt_loss(self, plt_map, gt_train, palette, weight=1.):  # palette in 3xN
         pix, opq = plt_map[..., :3], plt_map[..., 3:]
         E_opaque = F.mse_loss(opq, self.ones.expand_as(opq), reduction='mean')
         loss = F.mse_loss(pix, gt_train, reduction='mean')
         E_opaque = E_opaque - 1e3 * self.outsidehull_points_distance(palette.T)
+        E_opaque = E_opaque - 5e3 * torch.linalg.vector_norm(palette[:, -1])
         return loss * weight, E_opaque * weight
 
     def train_one_batch(self, tensorf, iteration, rays_train, *batch_gt):
