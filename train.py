@@ -181,14 +181,14 @@ class Trainer:
 
         return tensorf
 
-    def outsidehull_points_distance(self, inp_points, w_in=1., w_out=1e3):
+    def outsidehull_points_distance(self, inp_points, w_in=1e-1, w_out=1.):
         points = inp_points.detach().to('cpu', dtype=torch.double).numpy()
         simplex = self.de.find_simplex(points, tol=1e-8)
+        loss = w_in * knn_points(inp_points[simplex >= 0].unsqueeze(0), self.hull_vertices[None],
+                                 K=1, return_sorted=False).dists.sum()
         ind, = np.nonzero(simplex < 0)
         points = [min((DCPPointTriangle(pts, self.hull.points[j]) for j in self.hull.simplices),
                       key=itemgetter('distance'))['closest'] for pts in points[ind]]
-        loss = w_in * knn_points(inp_points[simplex >= 0].unsqueeze(0), self.hull_vertices[None],
-                                 K=1, return_sorted=False).dists.sum()
         if points:
             points = torch.asarray(points, device=inp_points.device, dtype=inp_points.dtype)
             loss = loss + w_out * F.mse_loss(inp_points[ind], points, reduction='sum')
@@ -198,9 +198,10 @@ class Trainer:
         pix, opq = plt_map[..., :3], plt_map[..., 3:]
         E_opaque = F.mse_loss(opq, self.ones.expand_as(opq), reduction='mean')
         loss = F.mse_loss(pix, gt_train, reduction='mean')
-        E_opaque = E_opaque - self.outsidehull_points_distance(palette.T)
-        E_opaque = E_opaque - 5e3 * torch.linalg.vector_norm(palette[:, -1])
-        return loss * weight, E_opaque * weight
+        reg_term = {'E_opaque': E_opaque,
+                    'PD': self.outsidehull_points_distance(palette.T),
+                    'BLACK': torch.linalg.vector_norm(palette[:, -1])}
+        return loss * weight, reg_term
 
     def train_one_batch(self, tensorf, iteration, rays_train, *batch_gt):
         args = self.args
@@ -219,10 +220,11 @@ class Trainer:
         # batch_gt = (batch_gt[0],)
         loss_weight = (1., 0.1)
         loss, E_opaque = zip(*map(self.plt_loss, rgb_map, batch_gt, palette, loss_weight))
-
+        reg_weights = {'E_opaque': -1. / 375, 'PD': 1., 'BLACK': 1.}
         # loss
-        total_loss = sum(loss) - sum(E_opaque) / 375
+        total_loss = sum(loss) + sum(map(lambda x: sum(reg_weights[k] * v for k, v in x.items()), E_opaque))
         loss, *_ = loss
+        E_opaque, *_ = E_opaque
         if self.Ortho_reg_weight > 0:
             loss_reg = tensorf.vector_comp_diffs()
             total_loss += self.Ortho_reg_weight * loss_reg
@@ -247,8 +249,7 @@ class Trainer:
         total_loss.backward()
         self.optimizer.step()
 
-        loss = loss.detach().item()
-        return loss
+        return loss.detach().item(), {k: v.detach().item() for k, v in E_opaque.items()}
 
     def update_grid_resolution(self, tensorf, iteration):
         args = self.args
@@ -321,7 +322,7 @@ class Trainer:
         pbar = trange(args.n_iters, miniters=args.progress_refresh_rate, file=sys.stdout)
         for iteration in pbar:
             batch_train = self.trainingSampler.getbatch(device=self.device)
-            loss = self.train_one_batch(tensorf, iteration, *batch_train)
+            loss, reg_terms = self.train_one_batch(tensorf, iteration, *batch_train)
 
             PSNRs.append(-10.0 * np.log(loss) / np.log(10.0))
             self.summary_writer.add_scalar('train/PSNR', PSNRs[-1], global_step=iteration)
