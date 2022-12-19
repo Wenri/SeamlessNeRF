@@ -25,7 +25,7 @@ from .TriMesh import TriMesh
 pyximport.install(reload_support=True)
 from .GteDistPointTriangle import DCPPointTriangle
 
-_DCP_PT_RET = namedtuple('_DCP_PT_RET', 'parameter closest distance sqrDistance')
+DcpPtRet = namedtuple('_DCP_PT_RET', 'parameter closest distance sqrDistance')
 
 
 def Convert_scipy_convexhull_face_ind_to_basic_face_ind(hull):

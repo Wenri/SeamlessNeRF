@@ -2,12 +2,14 @@ import logging
 import os
 import sys
 from datetime import datetime
+from operator import itemgetter
 from pathlib import Path
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from einops import rearrange
+from pytorch3d.ops import knn_points
 from scipy.spatial import ConvexHull, Delaunay
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import trange, tqdm
@@ -15,7 +17,7 @@ from tqdm import trange, tqdm
 from dataLoader import dataset_dict
 from models import MODEL_ZOO
 from models.palette.Additive_mixing_layers_extraction import Hull_Simplification_determined_version, \
-    Hull_Simplification_old, _DCP_PT_RET
+    Hull_Simplification_old
 from models.palette.GteDistPointTriangle import DCPPointTriangle
 from opt import config_parser
 from renderer import OctreeRender_trilinear_fast, evaluation, evaluation_path
@@ -76,6 +78,7 @@ class Trainer:
         self.palette, hull_vertices = self.build_palette(args.datadir)
         self.hull = ConvexHull(hull_vertices)
         self.de = Delaunay(hull_vertices)
+        self.hull_vertices = torch.from_numpy(hull_vertices).to(self.device, dtype=torch.float32)
         if len(self.train_dataset.all_sems):
             self.palette_sem = self.build_sem_palette(len(self.palette))
             print(self.palette_sem)
@@ -110,11 +113,10 @@ class Trainer:
     def recon_with_palette(self, palette, points):
         hull = ConvexHull(palette)
         de = Delaunay(hull.points[hull.vertices].clip(0.0, 1.0))
-        ind = de.find_simplex(points, tol=1e-8)
-        for i in tqdm(np.nonzero(ind < 0)[0], desc='recon_with_palette'):
-            dist_list = [_DCP_PT_RET(**DCPPointTriangle(points[i], hull.points[j])) for j in hull.simplices]
-            idx = np.fromiter((j.distance for j in dist_list), dtype=np.float_, count=len(dist_list)).argmin()
-            points[i] = dist_list[idx].closest
+        ind, = np.nonzero(de.find_simplex(points, tol=1e-8) < 0)
+        for i in tqdm(ind, desc='recon_with_palette'):
+            points[i] = min((DCPPointTriangle(points[i], hull.points[j]) for j in hull.simplices),
+                            key=itemgetter('distance'))['closest']
         return points
 
     def build_palette(self, filepath):
@@ -179,21 +181,24 @@ class Trainer:
 
         return tensorf
 
-    def outsidehull_points_distance(self, inp_points):
-        points = inp_points.detach().to('cpu', dtype=torch.double, copy=True).numpy()
-        ind = self.de.find_simplex(points, tol=1e-8)
-        for i in np.nonzero(ind < 0)[0]:
-            dist_list = [_DCP_PT_RET(**DCPPointTriangle(points[i], self.hull.points[j])) for j in self.hull.simplices]
-            idx = np.fromiter((j.distance for j in dist_list), dtype=np.float_, count=len(dist_list)).argmin()
-            points[i] = dist_list[idx].closest
-        points = torch.from_numpy(points).to(inp_points.device, dtype=inp_points.dtype)
-        return F.mse_loss(inp_points, points, reduction='sum')
+    def outsidehull_points_distance(self, inp_points, w_in=1., w_out=1e3):
+        points = inp_points.detach().to('cpu', dtype=torch.double).numpy()
+        simplex = self.de.find_simplex(points, tol=1e-8)
+        ind, = np.nonzero(simplex < 0)
+        points = [min((DCPPointTriangle(pts, self.hull.points[j]) for j in self.hull.simplices),
+                      key=itemgetter('distance'))['closest'] for pts in points[ind]]
+        loss = w_in * knn_points(inp_points[simplex >= 0].unsqueeze(0), self.hull_vertices[None],
+                                 K=1, return_sorted=False).dists.sum()
+        if points:
+            points = torch.asarray(points, device=inp_points.device, dtype=inp_points.dtype)
+            loss = loss + w_out * F.mse_loss(inp_points[ind], points, reduction='sum')
+        return loss
 
     def plt_loss(self, plt_map, gt_train, palette, weight=1.):  # palette in 3xN
         pix, opq = plt_map[..., :3], plt_map[..., 3:]
         E_opaque = F.mse_loss(opq, self.ones.expand_as(opq), reduction='mean')
         loss = F.mse_loss(pix, gt_train, reduction='mean')
-        E_opaque = E_opaque - 1e3 * self.outsidehull_points_distance(palette.T)
+        E_opaque = E_opaque - self.outsidehull_points_distance(palette.T)
         E_opaque = E_opaque - 5e3 * torch.linalg.vector_norm(palette[:, -1])
         return loss * weight, E_opaque * weight
 
