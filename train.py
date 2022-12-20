@@ -65,6 +65,7 @@ class Trainer:
     def __init__(self, args):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.renderer = OctreeRender_trilinear_fast
+        self.reg_weights = RegWeights_t(E_opaque=-1. / 375, PD=.1, BLACK=.1)
 
         # init dataset
         dataset = dataset_dict[args.dataset_name]
@@ -113,7 +114,6 @@ class Trainer:
         self.trainingSampler = None
         self.logger = logging.getLogger(type(self).__name__)
         self.ones = torch.ones((1, 1), device=self.device)
-        self.reg_weights = RegWeights_t(E_opaque=-1. / 375, PD=1., BLACK=1.)
 
     def recon_with_palette(self, palette, points):
         hull = ConvexHull(palette)
@@ -130,10 +130,11 @@ class Trainer:
         if self.train_dataset.white_bg:
             fg = torch.lt(rgbs, 1.).any(dim=-1)
             rgbs = rgbs[fg]
+        bg = np.zeros((3,), dtype=np.float32) if self.reg_weights.BLACK > 0 else None
         rgbs = rgbs.to(device='cpu', dtype=torch.double).numpy()
         hull = ConvexHull(rgbs)
         return sort_palette(rgbs, Hull_Simplification_determined_version(
-            rgbs, filepath.stem + "-convexhull_vertices", error_thres=1. / 256.)), hull.points[hull.vertices]
+            rgbs, filepath.stem + "-convexhull_vertices"), bg=bg), hull.points[hull.vertices]
 
     def build_sem_palette(self, E_vertice_num=10):
         w, h = self.train_dataset.img_wh
@@ -143,7 +144,7 @@ class Trainer:
             fg = torch.ones(self.train_dataset.all_rgbs.shape[:-1], dtype=torch.bool)
         coord = rearrange(fg, '(n h w) -> n h w', h=h, w=w).nonzero()
         rgbs = self.train_dataset.sample_sems(coord).to(device='cpu', dtype=torch.double).numpy()
-        return sort_palette(rgbs, Hull_Simplification_old(rgbs, E_vertice_num=E_vertice_num, error_thres=1. / 256.))
+        return sort_palette(rgbs, Hull_Simplification_old(rgbs, E_vertice_num=E_vertice_num))
 
     def pick_palette(self, root=None):
         from tkcolorpicker import askcolor
@@ -182,7 +183,8 @@ class Trainer:
                 density_shift=args.density_shift, distance_scale=args.distance_scale,
                 pos_pe=args.pos_pe, view_pe=args.view_pe, fea_pe=args.fea_pe,
                 featureC=args.featureC, step_ratio=args.step_ratio,
-                fea2denseAct=args.fea2denseAct, palette=palette)
+                fea2denseAct=args.fea2denseAct, palette=palette,
+                hullVertices=self.hull_vertices.cpu().tolist())
 
         return tensorf
 
@@ -190,13 +192,16 @@ class Trainer:
         points = inp_points.detach().to('cpu', dtype=torch.double).numpy()
         simplex = self.de.find_simplex(points, tol=1e-8)
         loss = w_in * knn_points(inp_points[simplex >= 0].unsqueeze(0), self.hull_vertices[None],
-                                 K=1, return_sorted=False).dists.sum()
+                                 K=1, return_sorted=False).dists
+        loss = w_in / n_in * loss.sum() if (n_in := loss.nelement()) else loss.sum()
         ind, = np.nonzero(simplex < 0)
         points = [min((DCPPointTriangle(pts, self.hull.points[j]) for j in self.hull.simplices),
                       key=itemgetter('distance'))['closest'] for pts in points[ind]]
         if points:
             points = torch.asarray(points, device=inp_points.device, dtype=inp_points.dtype)
-            loss = loss + w_out * F.mse_loss(inp_points[ind], points, reduction='sum')
+            loss = loss + w_out * F.mse_loss(inp_points[ind], points, reduction='none').sum(dim=-1).max()
+
+        assert torch.isfinite(loss)
         return loss
 
     def plt_loss(self, plt_map, gt_train, palette, weight=1.):  # palette in 3xN

@@ -5,7 +5,7 @@ from .tensorBase import positional_encoding
 
 
 class PLTRender(torch.nn.Module):
-    def __init__(self, inChanel, viewpe=6, feape=6, featureC=128, palette=None):
+    def __init__(self, inChanel, viewpe=6, feape=6, featureC=128, palette=None, hullVertices=None):
         super().__init__()
 
         self.in_mlpC = 2 * viewpe * 3 + 2 * feape * inChanel + 3 + inChanel
@@ -50,8 +50,8 @@ class PLTRender(torch.nn.Module):
 class MultiplePLTRender(torch.nn.ModuleList):
     PLT_NAMES = ('RGB', 'SEM')
 
-    def __init__(self, inChanel, viewpe=6, feape=6, featureC=128, *palettes):
-        super().__init__(PLTRender(inChanel, viewpe, feape, featureC, palette) for palette in palettes)
+    def __init__(self, inChanel, viewpe=6, feape=6, featureC=128, *palettes, **kwargs):
+        super().__init__(PLTRender(inChanel, viewpe, feape, featureC, palette, **kwargs) for palette in palettes)
         self.n_dim = sum(render.n_dim for render in self)
         self.n_palette = len(palettes)
 
