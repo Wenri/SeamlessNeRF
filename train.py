@@ -1,6 +1,8 @@
+import io
 import logging
 import os
 import sys
+from collections import namedtuple, defaultdict
 from datetime import datetime
 from operator import itemgetter
 from pathlib import Path
@@ -22,6 +24,8 @@ from models.palette.GteDistPointTriangle import DCPPointTriangle
 from opt import config_parser
 from renderer import OctreeRender_trilinear_fast, evaluation, evaluation_path
 from utils import convert_sdf_samples_to_ply, N_to_reso, cal_n_samples, TVLoss, sort_palette
+
+RegWeights_t = namedtuple('RegWeights_t', 'E_opaque PD BLACK')
 
 
 class SimpleSampler:
@@ -109,6 +113,7 @@ class Trainer:
         self.trainingSampler = None
         self.logger = logging.getLogger(type(self).__name__)
         self.ones = torch.ones((1, 1), device=self.device)
+        self.reg_weights = RegWeights_t(E_opaque=-1. / 375, PD=1., BLACK=1.)
 
     def recon_with_palette(self, palette, points):
         hull = ConvexHull(palette)
@@ -181,7 +186,7 @@ class Trainer:
 
         return tensorf
 
-    def outsidehull_points_distance(self, inp_points, w_in=1e-1, w_out=1.):
+    def outsidehull_points_distance(self, inp_points, w_in=1e-2, w_out=1.):
         points = inp_points.detach().to('cpu', dtype=torch.double).numpy()
         simplex = self.de.find_simplex(points, tol=1e-8)
         loss = w_in * knn_points(inp_points[simplex >= 0].unsqueeze(0), self.hull_vertices[None],
@@ -203,6 +208,9 @@ class Trainer:
                     'BLACK': torch.linalg.vector_norm(palette[:, -1])}
         return loss * weight, reg_term
 
+    def apply_weights(self, reg_term):
+        return sum(getattr(self.reg_weights, k) * v for k, v in reg_term.items())
+
     def train_one_batch(self, tensorf, iteration, rays_train, *batch_gt):
         args = self.args
         white_bg = self.train_dataset.white_bg
@@ -220,9 +228,8 @@ class Trainer:
         # batch_gt = (batch_gt[0],)
         loss_weight = (1., 0.1)
         loss, E_opaque = zip(*map(self.plt_loss, rgb_map, batch_gt, palette, loss_weight))
-        reg_weights = {'E_opaque': -1. / 375, 'PD': 1., 'BLACK': 1.}
         # loss
-        total_loss = sum(loss) + sum(map(lambda x: sum(reg_weights[k] * v for k, v in x.items()), E_opaque))
+        total_loss = sum(loss) + sum(map(self.apply_weights, E_opaque))
         loss, *_ = loss
         E_opaque, *_ = E_opaque
         if self.Ortho_reg_weight > 0:
@@ -314,6 +321,7 @@ class Trainer:
 
         torch.cuda.empty_cache()
         PSNRs, PSNRs_test = [], [0]
+        REGs = defaultdict(list)
 
         self.trainingSampler = SimpleSampler(self.train_dataset, args.batch_size)
         if not args.ndc_ray:
@@ -323,8 +331,10 @@ class Trainer:
         for iteration in pbar:
             batch_train = self.trainingSampler.getbatch(device=self.device)
             loss, reg_terms = self.train_one_batch(tensorf, iteration, *batch_train)
-
             PSNRs.append(-10.0 * np.log(loss) / np.log(10.0))
+            for k, v in reg_terms.items():
+                REGs[k].append(v)
+
             self.summary_writer.add_scalar('train/PSNR', PSNRs[-1], global_step=iteration)
             self.summary_writer.add_scalar('train/mse', loss, global_step=iteration)
 
@@ -333,13 +343,18 @@ class Trainer:
 
             # Print the current values of the losses.
             if iteration % args.progress_refresh_rate == 0:
-                pbar.set_description(
-                    f'Iteration {iteration:05d}:'
-                    + f' train_psnr = {float(np.mean(PSNRs)):.2f}'
-                    + f' test_psnr = {float(np.mean(PSNRs_test)):.2f}'
-                    + f' mse = {loss:.6f}'
-                )
-                PSNRs = []
+                with io.StringIO(
+                        f'Iteration {iteration:05d}:'
+                        + f' train_psnr = {float(np.mean(PSNRs)):.2f}'
+                        + f' test_psnr = {float(np.mean(PSNRs_test)):.2f}'
+                        + f' mse = {loss:.6f}'
+                ) as s:
+                    s.seek(0, io.SEEK_END)
+                    for k, v in REGs.items():
+                        print(f' {k} = {sum(v) / len(v):.6f}', file=s, end='')
+                    pbar.set_description(s.getvalue())
+                PSNRs.clear()
+                REGs.clear()
 
             if iteration % args.vis_every == args.vis_every - 1 and args.N_vis != 0:
                 try:

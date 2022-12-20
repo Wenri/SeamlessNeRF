@@ -17,7 +17,7 @@ class PLTRender(torch.nn.Module):
         layer3 = torch.nn.Linear(featureC, len_palette - 1)
         torch.nn.init.constant_(layer3.bias, 0)
         palette = torch.as_tensor(palette, dtype=torch.float32)
-        torch.nn.init.uniform_(palette)
+        # torch.nn.init.uniform_(palette)
         self.register_parameter('palette', torch.nn.Parameter(palette.T, requires_grad=True))
 
         self.mlp = torch.nn.Sequential(layer1, torch.nn.LeakyReLU(inplace=True),
