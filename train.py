@@ -65,7 +65,7 @@ class Trainer:
     def __init__(self, args):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.renderer = OctreeRender_trilinear_fast
-        self.reg_weights = RegWeights_t(E_opaque=-1. / 375, PD=.1, BLACK=.1)
+        self.reg_weights = RegWeights_t(E_opaque=-1. / 375, PD=1., BLACK=.1)
 
         # init dataset
         dataset = dataset_dict[args.dataset_name]
@@ -124,7 +124,7 @@ class Trainer:
                             key=itemgetter('distance'))['closest']
         return points
 
-    def build_palette(self, filepath, simplify=False):
+    def build_palette(self, filepath, simplify=True):
         filepath = Path(filepath)
         rgbs = self.train_dataset.all_rgbs
         if self.train_dataset.white_bg:
@@ -190,11 +190,11 @@ class Trainer:
 
         return tensorf
 
-    def outsidehull_points_distance(self, inp_points, w_in=1e-2, w_out=1.):
+    def outsidehull_points_distance(self, inp_points, w_in=1e-3, w_out=1.):
         points = inp_points.detach().to('cpu', dtype=torch.double).numpy()
         simplex = self.de.find_simplex(points, tol=1e-8)
-        loss = w_in * knn_points(inp_points[simplex >= 0].unsqueeze(0), self.hull_vertices[None],
-                                 K=1, return_sorted=False).dists
+        loss = knn_points(inp_points[simplex >= 0].unsqueeze(0), self.hull_vertices[None],
+                          K=1, return_sorted=False).dists
         loss = w_in / n_in * loss.sum() if (n_in := loss.nelement()) else loss.sum()
         ind, = np.nonzero(simplex < 0)
         points = [min((DCPPointTriangle(pts, self.hull.points[j]) for j in self.hull.simplices),
