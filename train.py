@@ -124,7 +124,7 @@ class Trainer:
                             key=itemgetter('distance'))['closest']
         return points
 
-    def build_palette(self, filepath):
+    def build_palette(self, filepath, simplify=False):
         filepath = Path(filepath)
         rgbs = self.train_dataset.all_rgbs
         if self.train_dataset.white_bg:
@@ -133,8 +133,10 @@ class Trainer:
         bg = np.zeros((3,), dtype=np.float32) if self.reg_weights.BLACK > 0 else None
         rgbs = rgbs.to(device='cpu', dtype=torch.double).numpy()
         hull = ConvexHull(rgbs)
-        return sort_palette(rgbs, Hull_Simplification_determined_version(
-            rgbs, filepath.stem + "-convexhull_vertices"), bg=bg), hull.points[hull.vertices]
+        hull_vertices = hull.points[hull.vertices]
+        palette = Hull_Simplification_determined_version(
+            rgbs, filepath.stem + "-convexhull_vertices") if simplify else hull_vertices
+        return sort_palette(rgbs, palette, bg=bg), hull.points[hull.vertices]
 
     def build_sem_palette(self, E_vertice_num=10):
         w, h = self.train_dataset.img_wh

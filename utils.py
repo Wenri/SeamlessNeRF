@@ -151,7 +151,10 @@ def convert_sdf_samples_to_ply(
     ply_data.write(ply_filename_out)
 
 
-def sort_palette(rgbs, palette_rgb, bg=None):
+def sort_palette(rgbs, palette_rgb, bg=None, K=1e8):
+    N = rgbs.shape[0]
+    if N > K:
+        rgbs = rgbs[torch.randperm(N)[:K]]
     dist = np.linalg.norm(rearrange(rgbs, 'N C -> N 1 C') - rearrange(palette_rgb, 'P C -> 1 P C'), axis=-1)
     dist = np.bincount(np.argmin(dist, axis=-1))
     if bg is not None:
