@@ -207,12 +207,15 @@ class Trainer:
         return loss
 
     def plt_loss(self, plt_map, gt_train, palette, weight=1.):  # palette in 3xN
-        pix, opq = plt_map[..., :3], plt_map[..., 3:]
-        E_opaque = F.mse_loss(opq, self.ones.expand_as(opq), reduction='mean')
-        loss = F.mse_loss(pix, gt_train, reduction='mean')
-        reg_term = {'E_opaque': E_opaque,
-                    'PD': self.outsidehull_points_distance(palette.T),
-                    'BLACK': torch.linalg.vector_norm(palette[:, -1])}
+        loss = F.mse_loss(plt_map[..., :3], gt_train, reduction='mean')
+        if palette is not None:
+            plt_map = plt_map[..., 3:]
+            E_opaque = F.mse_loss(plt_map, self.ones.expand_as(plt_map), reduction='mean')
+            reg_term = {'E_opaque': E_opaque,
+                        'PD': self.outsidehull_points_distance(palette.T),
+                        'BLACK': torch.linalg.vector_norm(palette[:, -1])}
+        else:
+            reg_term = {}
         return loss * weight, reg_term
 
     def apply_weights(self, reg_term):
@@ -223,8 +226,8 @@ class Trainer:
         white_bg = self.train_dataset.white_bg
         ndc_ray = args.ndc_ray
         n_palette = getattr(tensorf.renderModule, 'n_palette', 1)
-        palette = (render.palette for render in tensorf.renderModule
-                   ) if n_palette > 1 else (getattr(tensorf.renderModule, 'palette'),)
+        palette = (render.palette for render in tensorf.renderModule) if n_palette > 1 else (
+            getattr(tensorf.renderModule, 'palette', None),)
 
         # rgb_map, alphas_map, depth_map, weights, uncertainty
         rgb_map, alphas_map, depth_map, weights, uncertainty = self.renderer(

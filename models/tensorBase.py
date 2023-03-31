@@ -4,16 +4,9 @@ import numpy as np
 import torch
 import torch.nn
 import torch.nn.functional as F
-from einops import rearrange
 
+from .renderBase import RenderBase
 from .sh import eval_sh_bases
-
-
-def positional_encoding(positions, freqs):
-    freq_bands = (2 ** torch.arange(freqs).float()).to(positions.device)  # (F,)
-    pts = rearrange(positions[..., None] * freq_bands, 'N D F -> N (D F)')  # (..., DF)
-    pts = torch.cat([torch.sin(pts), torch.cos(pts)], dim=-1)
-    return pts
 
 
 def raw2alpha(sigma, dist):
@@ -60,7 +53,7 @@ class AlphaGridMask(torch.nn.Module):
         return (xyz_sampled - self.aabb[0]) * self.invgridSize - 1
 
 
-class MLPRender_Fea(torch.nn.Module):
+class MLPRender_Fea(RenderBase):
     def __init__(self, inChanel, viewpe=6, feape=6, featureC=128):
         super(MLPRender_Fea, self).__init__()
 
@@ -77,9 +70,9 @@ class MLPRender_Fea(torch.nn.Module):
     def forward(self, pts, viewdirs, features):
         indata = [features, viewdirs]
         if self.feape > 0:
-            indata += [positional_encoding(features, self.feape)]
+            indata += [self.positional_encoding(features, self.feape)]
         if self.viewpe > 0:
-            indata += [positional_encoding(viewdirs, self.viewpe)]
+            indata += [self.positional_encoding(viewdirs, self.viewpe)]
         mlp_in = torch.cat(indata, dim=-1)
         rgb = self.mlp(mlp_in)
         rgb = torch.sigmoid(rgb)
@@ -87,7 +80,7 @@ class MLPRender_Fea(torch.nn.Module):
         return rgb
 
 
-class MLPRender_PE(torch.nn.Module):
+class MLPRender_PE(RenderBase):
     def __init__(self, inChanel, viewpe=6, pospe=6, featureC=128):
         super(MLPRender_PE, self).__init__()
 
@@ -104,9 +97,9 @@ class MLPRender_PE(torch.nn.Module):
     def forward(self, pts, viewdirs, features):
         indata = [features, viewdirs]
         if self.pospe > 0:
-            indata += [positional_encoding(pts, self.pospe)]
+            indata += [self.positional_encoding(pts, self.pospe)]
         if self.viewpe > 0:
-            indata += [positional_encoding(viewdirs, self.viewpe)]
+            indata += [self.positional_encoding(viewdirs, self.viewpe)]
         mlp_in = torch.cat(indata, dim=-1)
         rgb = self.mlp(mlp_in)
         rgb = torch.sigmoid(rgb)
@@ -131,7 +124,7 @@ class MLPRender(torch.nn.Module):
     def forward(self, pts, viewdirs, features):
         indata = [features, viewdirs]
         if self.viewpe > 0:
-            indata += [positional_encoding(viewdirs, self.viewpe)]
+            indata += [self.positional_encoding(viewdirs, self.viewpe)]
         mlp_in = torch.cat(indata, dim=-1)
         rgb = self.mlp(mlp_in)
         rgb = torch.sigmoid(rgb)

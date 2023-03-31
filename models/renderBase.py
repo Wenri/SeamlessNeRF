@@ -1,10 +1,18 @@
 import torch
 import torch.nn.functional as F
+from einops import rearrange
 
-from .tensorBase import positional_encoding
+
+class RenderBase(torch.nn.Module):
+    @staticmethod
+    def positional_encoding(positions, freqs):
+        freq_bands = (2 ** torch.arange(freqs).float()).to(positions.device)  # (F,)
+        pts = rearrange(positions[..., None] * freq_bands, 'N D F -> N (D F)')  # (..., DF)
+        pts = torch.cat([torch.sin(pts), torch.cos(pts)], dim=-1)
+        return pts
 
 
-class PLTRender(torch.nn.Module):
+class PLTRender(RenderBase):
     def __init__(self, inChanel, viewpe=6, feape=6, featureC=128, palette=None, hullVertices=None):
         super().__init__()
 
@@ -39,9 +47,9 @@ class PLTRender(torch.nn.Module):
     def forward(self, pts, viewdirs, features):
         indata = [features, viewdirs]
         if self.feape > 0:
-            indata.append(positional_encoding(features, self.feape))
+            indata.append(self.positional_encoding(features, self.feape))
         if self.viewpe > 0:
-            indata.append(positional_encoding(viewdirs, self.viewpe))
+            indata.append(self.positional_encoding(viewdirs, self.viewpe))
         logits = self.mlp(torch.cat(indata, dim=-1))
         rgb, opaque = self.rgb_from_palette_rev(logits)
         return torch.cat((rgb, opaque), dim=-1)

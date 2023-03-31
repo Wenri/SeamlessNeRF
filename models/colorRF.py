@@ -1,4 +1,4 @@
-from .render import PLTRender, MultiplePLTRender
+from .renderBase import PLTRender, MultiplePLTRender
 from .tensoRF import TensorVMSplit
 
 
