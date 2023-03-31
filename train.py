@@ -134,8 +134,7 @@ class Trainer:
         rgbs = rgbs.to(device='cpu', dtype=torch.double).numpy()
         hull = ConvexHull(rgbs)
         hull_vertices = hull.points[hull.vertices]
-        palette = Hull_Simplification_determined_version(
-            rgbs, filepath.stem + "-convexhull_vertices") if simplify else hull_vertices
+        palette = Hull_Simplification_determined_version(rgbs) if simplify else hull_vertices
         return sort_palette(rgbs, palette, bg=bg), hull.points[hull.vertices]
 
     def build_sem_palette(self, E_vertice_num=10):

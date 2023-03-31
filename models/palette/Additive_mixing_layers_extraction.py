@@ -208,7 +208,7 @@ def get_unique_colors_and_their_counts(arr):
 
 
 ### assume data is in range(0,1)
-def Hull_Simplification_determined_version(data, output_prefix, num_thres=0.1, error_thres=2.0 / 255.0, SAVE=True,
+def Hull_Simplification_determined_version(data, output_prefix=None, num_thres=0.1, error_thres=2.0 / 255.0,
                                            option="use_quantitized_colors"):
     #     hull=ConvexHull(data.reshape((-1,3)), qhull_options="Qs")
     hull = ConvexHull(data.reshape((-1, 3)))
@@ -276,10 +276,8 @@ def Hull_Simplification_determined_version(data, output_prefix, num_thres=0.1, e
         if len(hull.vertices) == old_num or len(hull.vertices) == 4:
             break
 
-    output_rawhull_obj_file = output_prefix + "-mesh_obj_files.obj"
-    write_convexhull_into_obj_file(hull, output_rawhull_obj_file)
-
-    if SAVE:
+    if output_prefix:
+        write_convexhull_into_obj_file(hull, output_prefix + "-mesh_obj_files.obj")
         name = output_prefix + "-%02d.json" % len(hull.vertices)
         with open(name, 'w') as myfile:
             json.dump({'vs': (hull.points[hull.vertices].clip(0.0, 1.0) * 255).tolist(),
