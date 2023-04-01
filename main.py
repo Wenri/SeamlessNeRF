@@ -1,10 +1,9 @@
-import configargparse
-
-from dataLoader import dataset_dict
-from models import MODEL_ZOO
-
-
 def config_parser(cmd=None):
+    import configargparse
+
+    from dataLoader import dataset_dict
+    from models import MODEL_ZOO
+
     parser = configargparse.ArgumentParser()
     parser.add_argument('--config', is_config_file=True, help='config file path')
     parser.add_argument("--expname", type=str, help='experiment name')
@@ -81,7 +80,7 @@ def config_parser(cmd=None):
     parser.add_argument('--nSamples', type=int, default=1e6, help='sample point each ray, pass 1e6 if automatic adjust')
     parser.add_argument('--step_ratio', type=float, default=0.5)
 
-    ## blender flags
+    # blender flags
     parser.add_argument("--white_bkgd", action='store_true',
                         help='set to render synthetic data on a white bkgd (always use for dvoxels)')
 
@@ -96,3 +95,35 @@ def config_parser(cmd=None):
     parser.add_argument("--vis_every", type=int, default=10000, help='frequency of visualize the image')
 
     return parser.parse_args(cmd)
+
+
+# A function to set up the running environment for the training
+def setup_environment(cudaMallocAsync=True):
+    import os
+    from contextlib import suppress
+
+    if cudaMallocAsync:
+        os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'backend:cudaMallocAsync'
+
+    import numpy as np
+    import torch
+
+    with suppress(ImportError):
+        from torch.backends import cuda, cudnn
+        # The flag below controls whether to allow TF32 on matmul. This flag defaults to False
+        # in PyTorch 1.12 and later.
+        cuda.matmul.allow_tf32 = True
+        # The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
+        cudnn.allow_tf32 = True
+
+    torch.set_default_dtype(torch.float32)
+
+    # Set the seed for generating random numbers.
+    np.random.seed(np.bitwise_xor(*np.atleast_1d(np.asarray(torch.seed(), dtype=np.uint64)).view(np.uint32)).item())
+
+    import train
+    return train.main
+
+
+if __name__ == "__main__":
+    setup_environment()(config_parser())

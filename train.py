@@ -21,7 +21,6 @@ from models import MODEL_ZOO
 from models.palette.Additive_mixing_layers_extraction import Hull_Simplification_determined_version, \
     Hull_Simplification_old
 from models.palette.GteDistPointTriangle import DCPPointTriangle
-from opt import config_parser
 from renderer import OctreeRender_trilinear_fast, evaluation, evaluation_path
 from utils import convert_sdf_samples_to_ply, N_to_reso, cal_n_samples, TVLoss, sort_palette
 
@@ -442,9 +441,3 @@ def main(args):
         trainer.render_test(trainer.build_network())
     else:
         trainer.reconstruction()
-
-
-if __name__ == '__main__':
-    torch.set_default_dtype(torch.float32)
-    np.random.seed(np.bitwise_xor(*np.atleast_1d(np.asarray(torch.seed(), dtype=np.uint64)).view(np.uint32)).item())
-    main(config_parser())
