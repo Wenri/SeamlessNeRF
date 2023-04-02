@@ -2,29 +2,24 @@ import io
 import logging
 import os
 import sys
-from collections import namedtuple, defaultdict
+from collections import defaultdict
 from datetime import datetime
-from operator import itemgetter
 from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from einops import rearrange
-from pytorch3d.ops import knn_points
-from scipy.spatial import ConvexHull, Delaunay
+from scipy.spatial import ConvexHull
 from torch.utils.tensorboard import SummaryWriter
-from tqdm import trange, tqdm
+from tqdm import trange
 
 from dataLoader import dataset_dict
 from models import MODEL_ZOO
+from models.loss import PLTLoss
 from models.palette.Additive_mixing_layers_extraction import Hull_Simplification_determined_version, \
     Hull_Simplification_old
-from models.palette.GteDistPointTriangle import DCPPointTriangle
 from renderer import OctreeRender_trilinear_fast, evaluation, evaluation_path
 from utils import convert_sdf_samples_to_ply, N_to_reso, cal_n_samples, TVLoss, sort_palette
-
-RegWeights_t = namedtuple('RegWeights_t', 'E_opaque PD BLACK')
 
 
 class SimpleSampler:
@@ -64,7 +59,6 @@ class Trainer:
     def __init__(self, args):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.renderer = OctreeRender_trilinear_fast
-        self.reg_weights = RegWeights_t(E_opaque=-1. / 375, PD=1., BLACK=.1)
 
         # init dataset
         dataset = dataset_dict[args.dataset_name]
@@ -79,10 +73,10 @@ class Trainer:
         self.reso_cur = N_to_reso(args.N_voxel_init, self.aabb)
         self.reso_mask = None
         self.nSamples = min(args.nSamples, cal_n_samples(self.reso_cur, args.step_ratio))
-        self.palette, hull_vertices = self.build_palette(args.datadir)
-        self.hull = ConvexHull(hull_vertices)
-        self.de = Delaunay(hull_vertices)
-        self.hull_vertices = torch.from_numpy(hull_vertices).to(self.device, dtype=torch.float32)
+        reg_weights = PLTLoss.RegWeights_t._field_defaults
+        self.palette, self.hull_vertices = self.build_palette(
+            bg=np.zeros((3,), dtype=np.float32) if reg_weights['BLACK'] > 0 else None)
+        self.losses = PLTLoss(self.hull_vertices, self.device)
         if len(self.train_dataset.all_sems):
             self.palette_sem = self.build_sem_palette(len(self.palette))
             print(self.palette_sem)
@@ -112,24 +106,12 @@ class Trainer:
         self.summary_writer = None
         self.trainingSampler = None
         self.logger = logging.getLogger(type(self).__name__)
-        self.ones = torch.ones((1, 1), device=self.device)
 
-    def recon_with_palette(self, palette, points):
-        hull = ConvexHull(palette)
-        de = Delaunay(hull.points[hull.vertices].clip(0.0, 1.0))
-        ind, = np.nonzero(de.find_simplex(points, tol=1e-8) < 0)
-        for i in tqdm(ind, desc='recon_with_palette'):
-            points[i] = min((DCPPointTriangle(points[i], hull.points[j]) for j in hull.simplices),
-                            key=itemgetter('distance'))['closest']
-        return points
-
-    def build_palette(self, filepath, simplify=True):
-        filepath = Path(filepath)
+    def build_palette(self, simplify=True, bg=None):
         rgbs = self.train_dataset.all_rgbs
         if self.train_dataset.white_bg:
             fg = torch.lt(rgbs, 1.).any(dim=-1)
             rgbs = rgbs[fg]
-        bg = np.zeros((3,), dtype=np.float32) if self.reg_weights.BLACK > 0 else None
         rgbs = rgbs.to(device='cpu', dtype=torch.double).numpy()
         hull = ConvexHull(rgbs)
         hull_vertices = hull.points[hull.vertices]
@@ -169,13 +151,13 @@ class Trainer:
             kwargs = ckpt['kwargs']
             kwargs.update({'device': self.device,
                            'palette': self.pick_palette()})
-            tensorf = MODEL_ZOO[args.model_name](**kwargs)
+            tensorf = args.model_name(**kwargs)
             tensorf.load(ckpt)
         else:
             palette = self.palette
             if self.palette_sem is not None:
                 palette = (palette, self.palette_sem)
-            tensorf = MODEL_ZOO[args.model_name](
+            tensorf = args.model_name(
                 self.aabb, self.reso_cur, self.device,
                 density_n_comp=n_lamb_sigma, appearance_n_comp=n_lamb_sh,
                 app_dim=args.data_dim_color, near_far=near_far,
@@ -184,40 +166,9 @@ class Trainer:
                 pos_pe=args.pos_pe, view_pe=args.view_pe, fea_pe=args.fea_pe,
                 featureC=args.featureC, step_ratio=args.step_ratio,
                 fea2denseAct=args.fea2denseAct, palette=palette,
-                hullVertices=self.hull_vertices.cpu().tolist())
+                hullVertices=self.hull_vertices.tolist())
 
         return tensorf
-
-    def outsidehull_points_distance(self, inp_points, w_in=1e-3, w_out=1.):
-        points = inp_points.detach().to('cpu', dtype=torch.double).numpy()
-        simplex = self.de.find_simplex(points, tol=1e-8)
-        loss = knn_points(inp_points[simplex >= 0].unsqueeze(0), self.hull_vertices[None],
-                          K=1, return_sorted=False).dists
-        loss = w_in / n_in * loss.sum() if (n_in := loss.nelement()) else loss.sum()
-        ind, = np.nonzero(simplex < 0)
-        points = [min((DCPPointTriangle(pts, self.hull.points[j]) for j in self.hull.simplices),
-                      key=itemgetter('distance'))['closest'] for pts in points[ind]]
-        if points:
-            points = torch.asarray(points, device=inp_points.device, dtype=inp_points.dtype)
-            loss = loss + w_out * F.mse_loss(inp_points[ind], points, reduction='none').sum(dim=-1).max()
-
-        assert torch.isfinite(loss)
-        return loss
-
-    def plt_loss(self, plt_map, gt_train, palette, weight=1.):  # palette in 3xN
-        loss = F.mse_loss(plt_map[..., :3], gt_train, reduction='mean')
-        if palette is not None:
-            plt_map = plt_map[..., 3:]
-            E_opaque = F.mse_loss(plt_map, self.ones.expand_as(plt_map), reduction='mean')
-            reg_term = {'E_opaque': E_opaque,
-                        'PD': self.outsidehull_points_distance(palette.T),
-                        'BLACK': torch.linalg.vector_norm(palette[:, -1])}
-        else:
-            reg_term = {}
-        return loss * weight, reg_term
-
-    def apply_weights(self, reg_term):
-        return sum(getattr(self.reg_weights, k) * v for k, v in reg_term.items())
 
     def train_one_batch(self, tensorf, iteration, rays_train, *batch_gt):
         args = self.args
@@ -233,13 +184,12 @@ class Trainer:
             ndc_ray=ndc_ray, device=self.device, is_train=True)
 
         rgb_map = torch.tensor_split(rgb_map, n_palette, dim=-1)
-        # batch_gt = (batch_gt[0],)
-        loss_weight = (1., 0.1)
-        loss, E_opaque = zip(*map(self.plt_loss, rgb_map, batch_gt, palette, loss_weight))
-        # loss
-        total_loss = sum(loss) + sum(map(self.apply_weights, E_opaque))
+        loss_weight = (1., 0.1,)
+        loss, reg_term = zip(*map(self.losses.plt_loss, rgb_map, batch_gt, palette, loss_weight))
+        # apply reg weights and add to loss
+        total_loss = sum(loss) + sum(map(self.losses.apply_weights, reg_term))
         loss, *_ = loss
-        E_opaque, *_ = E_opaque
+        reg_term, *_ = reg_term
         if self.Ortho_reg_weight > 0:
             loss_reg = tensorf.vector_comp_diffs()
             total_loss += self.Ortho_reg_weight * loss_reg
@@ -264,7 +214,7 @@ class Trainer:
         total_loss.backward()
         self.optimizer.step()
 
-        return loss.detach().item(), {k: v.detach().item() for k, v in E_opaque.items()}
+        return loss.detach().item(), {k: v.detach().item() for k, v in reg_term.items()}
 
     def update_grid_resolution(self, tensorf, iteration):
         args = self.args
@@ -386,7 +336,7 @@ class Trainer:
         ckpt = torch.load(args.ckpt, map_location=self.device)
         kwargs = ckpt['kwargs']
         kwargs.update({'device': self.device})
-        tensorf = MODEL_ZOO[args.model_name](**kwargs)
+        tensorf = args.model_name(**kwargs)
         tensorf.load(ckpt)
 
         alpha, _ = tensorf.getDenseAlpha()

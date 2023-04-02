@@ -13,6 +13,8 @@ class RenderBase(torch.nn.Module):
 
 
 class PLTRender(RenderBase):
+    _aliases = ('PLT_Fea',)
+
     def __init__(self, inChanel, viewpe=6, feape=6, featureC=128, palette=None, hullVertices=None):
         super().__init__()
 
@@ -56,6 +58,7 @@ class PLTRender(RenderBase):
 
 
 class MultiplePLTRender(torch.nn.ModuleList):
+    _aliases = ('PLT_Fea_Multi',)
     PLT_NAMES = ('RGB', 'SEM')
 
     def __init__(self, inChanel, viewpe=6, feape=6, featureC=128, *palettes, **kwargs):

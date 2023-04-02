@@ -54,6 +54,8 @@ class AlphaGridMask(torch.nn.Module):
 
 
 class MLPRender_Fea(RenderBase):
+    _aliases = ("MLP_Fea",)
+
     def __init__(self, inChanel, viewpe=6, feape=6, featureC=128):
         super(MLPRender_Fea, self).__init__()
 
@@ -81,6 +83,8 @@ class MLPRender_Fea(RenderBase):
 
 
 class MLPRender_PE(RenderBase):
+    _aliases = ("MLP_PE",)
+
     def __init__(self, inChanel, viewpe=6, pospe=6, featureC=128):
         super(MLPRender_PE, self).__init__()
 
@@ -108,6 +112,8 @@ class MLPRender_PE(RenderBase):
 
 
 class MLPRender(torch.nn.Module):
+    _aliases = ("MLP",)
+
     def __init__(self, inChanel, viewpe=6, featureC=128):
         super(MLPRender, self).__init__()
 
@@ -167,20 +173,20 @@ class TensorBase(torch.nn.Module):
         self.n_dim = getattr(self.renderModule, 'n_dim', 3)
         print(self.renderModule)
 
-    def init_render_func(self, shadingMode='MLP_PE', pos_pe=6, view_pe=6, fea_pe=6, featureC=128, **kwargs):
+    def init_render_func(self, shadingMode, pos_pe=6, view_pe=6, fea_pe=6, featureC=128, **kwargs):
         print("pos_pe", pos_pe, "view_pe", view_pe, "fea_pe", fea_pe)
-        match shadingMode:
-            case 'MLP_PE':
-                ret = MLPRender_PE(self.app_dim, view_pe, pos_pe, featureC).to(self.device)
-            case 'MLP_Fea':
-                ret = MLPRender_Fea(self.app_dim, view_pe, fea_pe, featureC).to(self.device)
-            case 'MLP':
-                ret = MLPRender(self.app_dim, view_pe, featureC).to(self.device)
-            case 'SH':
-                ret = SHRender
-            case 'RGB':
+        ret = shadingMode
+        match shadingMode.__name__:
+            case MLPRender_PE.__name__:
+                ret = shadingMode(self.app_dim, view_pe, pos_pe, featureC).to(self.device)
+            case MLPRender_Fea.__name__:
+                ret = shadingMode(self.app_dim, view_pe, fea_pe, featureC).to(self.device)
+            case MLPRender.__name__:
+                ret = shadingMode(self.app_dim, view_pe, featureC).to(self.device)
+            case SHRender.__name__:
+                pass
+            case RGBRender.__name__:
                 assert self.app_dim == 3
-                ret = RGBRender
             case _:
                 raise ValueError("Unrecognized shading module")
         return ret

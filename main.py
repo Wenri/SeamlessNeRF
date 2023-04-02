@@ -2,7 +2,7 @@ def config_parser(cmd=None):
     import configargparse
 
     from dataLoader import dataset_dict
-    from models import MODEL_ZOO
+    from models import MODEL_ZOO, LOSS_ZOO, RENDER_ZOO
 
     parser = configargparse.ArgumentParser()
     parser.add_argument('--config', is_config_file=True, help='config file path')
@@ -17,7 +17,7 @@ def config_parser(cmd=None):
     parser.add_argument('--downsample_train', type=float, default=1.0)
     parser.add_argument('--downsample_test', type=float, default=1.0)
 
-    parser.add_argument('--model_name', type=str, default='TensorVMSplit', choices=MODEL_ZOO.keys())
+    parser.add_argument('--model_name', type=MODEL_ZOO.get, default='TensorVMSplit', choices=MODEL_ZOO)
 
     # loader options
     parser.add_argument("--batch_size", type=int, default=4096)
@@ -56,12 +56,13 @@ def config_parser(cmd=None):
                         help='shift density in softplus; making density = 0  when feature == 0')
 
     # network decoder
-    parser.add_argument("--shadingMode", type=str, default="MLP_PE", help='which shading mode to use')
+    parser.add_argument("--shadingMode", type=RENDER_ZOO.get, default="MLP_PE", choices=RENDER_ZOO)
     parser.add_argument("--pos_pe", type=int, default=6, help='number of pe for pos')
     parser.add_argument("--view_pe", type=int, default=6, help='number of pe for view')
     parser.add_argument("--fea_pe", type=int, default=6, help='number of pe for features')
     parser.add_argument("--featureC", type=int, default=128, help='hidden feature channel in MLP')
-    parser.add_argument("--semantic_type", type=str, default='vgg', help='semantic_type')
+    parser.add_argument("--semantic_type", type=str, default='vgg', help='semantic type')
+    parser.add_argument("--lossMode", type=LOSS_ZOO.get, default='PLTLoss', choices=LOSS_ZOO)
 
     parser.add_argument("--ckpt", type=str, default=None,
                         help='specific weights npy file to reload for coarse network')
@@ -120,6 +121,9 @@ def setup_environment(cudaMallocAsync=True):
 
     # Set the seed for generating random numbers.
     np.random.seed(np.bitwise_xor(*np.atleast_1d(np.asarray(torch.seed(), dtype=np.uint64)).view(np.uint32)).item())
+
+    import pyximport
+    pyximport.install()
 
     import train
     return train.main
