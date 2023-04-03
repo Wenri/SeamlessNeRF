@@ -1,8 +1,7 @@
 from models.colorRF import ColorVMSplit
 from models.loss import PLTLoss
-from models.renderBase import PLTRender, MultiplePLTRender
+from models.renderBase import PLTRender, MultiplePLTRender, SHRender, RGBRender, MLPRender_Fea, MLPRender_PE, MLPRender
 from models.tensoRF import TensorVM, TensorCP, TensorVMSplit
-from models.tensorBase import MLPRender, MLPRender_PE, MLPRender_Fea, SHRender, RGBRender
 
 
 class ClassCollection(dict):

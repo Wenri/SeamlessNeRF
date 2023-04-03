@@ -14,8 +14,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import trange
 
 from dataLoader import dataset_dict
-from models import MODEL_ZOO
-from models.loss import PLTLoss
+from models.loss import LossBase
 from models.palette.Additive_mixing_layers_extraction import Hull_Simplification_determined_version, \
     Hull_Simplification_old
 from renderer import OctreeRender_trilinear_fast, evaluation, evaluation_path
@@ -73,10 +72,10 @@ class Trainer:
         self.reso_cur = N_to_reso(args.N_voxel_init, self.aabb)
         self.reso_mask = None
         self.nSamples = min(args.nSamples, cal_n_samples(self.reso_cur, args.step_ratio))
-        reg_weights = PLTLoss.RegWeights_t._field_defaults
+        reg_weights: LossBase.RegWeights_t = args.lossMode.RegWeights_t
         self.palette, self.hull_vertices = self.build_palette(
-            bg=np.zeros((3,), dtype=np.float32) if reg_weights['BLACK'] > 0 else None)
-        self.losses = PLTLoss(self.hull_vertices, self.device)
+            bg=np.zeros((3,), dtype=np.float32) if reg_weights._field_defaults['BLACK'] > 0 else None)
+        self.losses = args.lossMode(self.hull_vertices, self.device)
         if len(self.train_dataset.all_sems):
             self.palette_sem = self.build_sem_palette(len(self.palette))
             print(self.palette_sem)

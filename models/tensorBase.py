@@ -5,9 +5,6 @@ import torch
 import torch.nn
 import torch.nn.functional as F
 
-from .renderBase import RenderBase
-from .sh import eval_sh_bases
-
 
 def raw2alpha(sigma, dist):
     # sigma, dist  [N_rays, N_samples]
@@ -17,18 +14,6 @@ def raw2alpha(sigma, dist):
 
     weights = alpha * T[:, :-1]  # [N_rays, N_samples]
     return alpha, weights, T[:, -1:]
-
-
-def SHRender(xyz_sampled, viewdirs, features):
-    sh_mult = eval_sh_bases(2, viewdirs)[:, None]
-    rgb_sh = features.view(-1, 3, sh_mult.shape[-1])
-    rgb = torch.relu(torch.sum(sh_mult * rgb_sh, dim=-1) + 0.5)
-    return rgb
-
-
-def RGBRender(xyz_sampled, viewdirs, features):
-    rgb = features
-    return rgb
 
 
 class AlphaGridMask(torch.nn.Module):
@@ -51,91 +36,6 @@ class AlphaGridMask(torch.nn.Module):
 
     def normalize_coord(self, xyz_sampled):
         return (xyz_sampled - self.aabb[0]) * self.invgridSize - 1
-
-
-class MLPRender_Fea(RenderBase):
-    _aliases = ("MLP_Fea",)
-
-    def __init__(self, inChanel, viewpe=6, feape=6, featureC=128):
-        super(MLPRender_Fea, self).__init__()
-
-        self.in_mlpC = 2 * viewpe * 3 + 2 * feape * inChanel + 3 + inChanel
-        self.viewpe = viewpe
-        self.feape = feape
-        layer1 = torch.nn.Linear(self.in_mlpC, featureC)
-        layer2 = torch.nn.Linear(featureC, featureC)
-        layer3 = torch.nn.Linear(featureC, 3)
-
-        self.mlp = torch.nn.Sequential(layer1, torch.nn.ReLU(inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
-        torch.nn.init.constant_(self.mlp[-1].bias, 0)
-
-    def forward(self, pts, viewdirs, features):
-        indata = [features, viewdirs]
-        if self.feape > 0:
-            indata += [self.positional_encoding(features, self.feape)]
-        if self.viewpe > 0:
-            indata += [self.positional_encoding(viewdirs, self.viewpe)]
-        mlp_in = torch.cat(indata, dim=-1)
-        rgb = self.mlp(mlp_in)
-        rgb = torch.sigmoid(rgb)
-
-        return rgb
-
-
-class MLPRender_PE(RenderBase):
-    _aliases = ("MLP_PE",)
-
-    def __init__(self, inChanel, viewpe=6, pospe=6, featureC=128):
-        super(MLPRender_PE, self).__init__()
-
-        self.in_mlpC = (3 + 2 * viewpe * 3) + (3 + 2 * pospe * 3) + inChanel  #
-        self.viewpe = viewpe
-        self.pospe = pospe
-        layer1 = torch.nn.Linear(self.in_mlpC, featureC)
-        layer2 = torch.nn.Linear(featureC, featureC)
-        layer3 = torch.nn.Linear(featureC, 3)
-
-        self.mlp = torch.nn.Sequential(layer1, torch.nn.ReLU(inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
-        torch.nn.init.constant_(self.mlp[-1].bias, 0)
-
-    def forward(self, pts, viewdirs, features):
-        indata = [features, viewdirs]
-        if self.pospe > 0:
-            indata += [self.positional_encoding(pts, self.pospe)]
-        if self.viewpe > 0:
-            indata += [self.positional_encoding(viewdirs, self.viewpe)]
-        mlp_in = torch.cat(indata, dim=-1)
-        rgb = self.mlp(mlp_in)
-        rgb = torch.sigmoid(rgb)
-
-        return rgb
-
-
-class MLPRender(torch.nn.Module):
-    _aliases = ("MLP",)
-
-    def __init__(self, inChanel, viewpe=6, featureC=128):
-        super(MLPRender, self).__init__()
-
-        self.in_mlpC = (3 + 2 * viewpe * 3) + inChanel
-        self.viewpe = viewpe
-
-        layer1 = torch.nn.Linear(self.in_mlpC, featureC)
-        layer2 = torch.nn.Linear(featureC, featureC)
-        layer3 = torch.nn.Linear(featureC, 3)
-
-        self.mlp = torch.nn.Sequential(layer1, torch.nn.ReLU(inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
-        torch.nn.init.constant_(self.mlp[-1].bias, 0)
-
-    def forward(self, pts, viewdirs, features):
-        indata = [features, viewdirs]
-        if self.viewpe > 0:
-            indata += [self.positional_encoding(viewdirs, self.viewpe)]
-        mlp_in = torch.cat(indata, dim=-1)
-        rgb = self.mlp(mlp_in)
-        rgb = torch.sigmoid(rgb)
-
-        return rgb
 
 
 class TensorBase(torch.nn.Module):
@@ -174,19 +74,23 @@ class TensorBase(torch.nn.Module):
         print(self.renderModule)
 
     def init_render_func(self, shadingMode, pos_pe=6, view_pe=6, fea_pe=6, featureC=128, **kwargs):
+        from . import renderBase as Rndr
         print("pos_pe", pos_pe, "view_pe", view_pe, "fea_pe", fea_pe)
         ret = shadingMode
-        match shadingMode.__name__:
-            case MLPRender_PE.__name__:
+        match shadingMode:
+            case Rndr.MLPRender_PE:
                 ret = shadingMode(self.app_dim, view_pe, pos_pe, featureC).to(self.device)
-            case MLPRender_Fea.__name__:
+            case Rndr.MLPRender_Fea:
                 ret = shadingMode(self.app_dim, view_pe, fea_pe, featureC).to(self.device)
-            case MLPRender.__name__:
+            case Rndr.MLPRender:
                 ret = shadingMode(self.app_dim, view_pe, featureC).to(self.device)
-            case SHRender.__name__:
+            case Rndr.SHRender:
                 pass
-            case RGBRender.__name__:
+            case Rndr.RGBRender:
                 assert self.app_dim == 3
+            case Rndr.RenderBase | torch.nn.ModuleList:
+                return shadingMode(self.app_dim, view_pe=view_pe, pos_pe=pos_pe, fea_pe=fea_pe, featureC=featureC,
+                                   **kwargs).to(self.device)
             case _:
                 raise ValueError("Unrecognized shading module")
         return ret
