@@ -21,7 +21,7 @@ n_lamb_sh = [48,48,48]
 model_name = ColorVMSplit
 
 
-shadingMode = MLP_Fea
+shadingMode = PoissonMLPRender
 fea2denseAct = softplus
 semantic_type = None
 

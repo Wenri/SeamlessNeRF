@@ -1,4 +1,4 @@
-from models.colorRF import ColorVMSplit
+from models.colorRF import ColorVMSplit, PoissonMLPRender
 from models.loss import PLTLoss
 from models.renderBase import PLTRender, MultiplePLTRender, SHRender, RGBRender, MLPRender_Fea, MLPRender_PE, MLPRender
 from models.tensoRF import TensorVM, TensorCP, TensorVMSplit
@@ -18,4 +18,5 @@ class ClassCollection(dict):
 
 MODEL_ZOO = ClassCollection(TensorVM, TensorCP, TensorVMSplit, ColorVMSplit)
 LOSS_ZOO = ClassCollection(PLTLoss)
-RENDER_ZOO = ClassCollection(MLPRender_PE, MLPRender_Fea, MLPRender, SHRender, RGBRender, PLTRender, MultiplePLTRender)
+RENDER_ZOO = ClassCollection(MLPRender_PE, MLPRender_Fea, MLPRender, SHRender, RGBRender, PLTRender, MultiplePLTRender,
+                             PoissonMLPRender)

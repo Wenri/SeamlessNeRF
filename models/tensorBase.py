@@ -88,10 +88,10 @@ class TensorBase(torch.nn.Module):
                 pass
             case Rndr.RGBRender:
                 assert self.app_dim == 3
-            case Rndr.RenderBase | torch.nn.ModuleList:
-                return shadingMode(self.app_dim, view_pe=view_pe, pos_pe=pos_pe, fea_pe=fea_pe, featureC=featureC,
-                                   **kwargs).to(self.device)
             case _:
+                if issubclass(shadingMode, Rndr.RenderBase | torch.nn.ModuleList):
+                    return shadingMode(self.app_dim, view_pe=view_pe, pos_pe=pos_pe, fea_pe=fea_pe, featureC=featureC,
+                                       **kwargs).to(self.device)
                 raise ValueError("Unrecognized shading module")
         return ret
 
@@ -303,6 +303,10 @@ class TensorBase(torch.nn.Module):
 
         return alpha
 
+    def compute_radiance(self, pts, viewdirs):
+        app_features = self.compute_appfeature(pts)
+        return self.renderModule(pts, viewdirs, app_features)
+
     def forward(self, rays_chunk, white_bg=True, is_train=False, ndc_ray=False, N_samples=-1):
 
         # sample points
@@ -342,9 +346,7 @@ class TensorBase(torch.nn.Module):
         app_mask = weight > self.rayMarch_weight_thres
 
         if app_mask.any():
-            app_features = self.compute_appfeature(xyz_sampled[app_mask])
-            valid_rgbs = self.renderModule(xyz_sampled[app_mask], viewdirs[app_mask], app_features)
-            rgb[app_mask] = valid_rgbs
+            rgb[app_mask] = self.compute_radiance(xyz_sampled[app_mask], viewdirs[app_mask])
 
         acc_map = torch.sum(weight, -1)
         rgb_map = torch.sum(weight[..., None] * rgb, -2)
