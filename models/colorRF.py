@@ -9,11 +9,14 @@ class ColorVMSplit(TensorVMSplit):
         return super().init_render_func(shadingMode, pos_pe, view_pe, fea_pe, featureC, **kwargs)
 
     def compute_radiance(self, pts, viewdirs):
+        """
         def batch_func(x):
             return super(ColorVMSplit, self).compute_radiance(x, viewdirs).sum(dim=0)
 
         j = torch.autograd.functional.jacobian(batch_func, pts, create_graph=True, strict=True)
         return j.sum(dim=0)
+        """
+        return super().compute_radiance(pts, viewdirs)
 
 
 class PoissonMLPRender(MLPRender_Fea):

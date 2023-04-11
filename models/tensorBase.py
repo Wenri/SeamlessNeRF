@@ -1,4 +1,5 @@
 import time
+from functools import partial
 
 import numpy as np
 import torch
@@ -89,9 +90,9 @@ class TensorBase(torch.nn.Module):
             case Rndr.RGBRender:
                 assert self.app_dim == 3
             case _:
+                ret = partial(ret, self.app_dim, view_pe=view_pe, pos_pe=pos_pe, fea_pe=fea_pe, featureC=featureC)
                 if issubclass(shadingMode, Rndr.RenderBase | torch.nn.ModuleList):
-                    return shadingMode(self.app_dim, view_pe=view_pe, pos_pe=pos_pe, fea_pe=fea_pe, featureC=featureC,
-                                       **kwargs).to(self.device)
+                    return ret(**kwargs).to(self.device)
                 raise ValueError("Unrecognized shading module")
         return ret
 
