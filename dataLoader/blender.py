@@ -1,6 +1,7 @@
 import json
 import os
 
+import kornia.filters.laplacian
 from PIL import Image
 from einops import rearrange
 from torch.nn import functional as F
@@ -38,6 +39,36 @@ class BlenderDataset(Dataset):
         depth = np.array(read_pfm(filename)[0], dtype=np.float32)  # (800, 800)
         return depth
 
+    def read_frame(self, file_path):
+        image_path = os.path.join(self.root_dir, f"{file_path}.png")
+        self.image_paths.append(image_path)
+        img = Image.open(image_path)
+
+        if self.downsample != 1.0:
+            img = img.resize(self.img_wh, Image.LANCZOS)
+
+        img = self.transform(img)  # (4, h, w)
+        if img.size(0) == 4:
+            img = img[:3] * img[-1:] + (1 - img[-1:])  # blend A to RGB
+
+        img, = kornia.filters.laplacian(img[None], 3)
+        self.all_rgbs.append(rearrange(img, 'c h w -> (h w) c'))  # RGBA
+        return img
+
+    def read_semantic(self, img, vgg=None):
+        if not vgg:
+            return
+
+        with torch.no_grad():
+            sem = rearrange(vgg(img.cuda()), 'N C H W -> N H W C').cpu()
+        if self.pca:
+            sem = self.pca.transform(rearrange(sem, 'N H W C -> (N H W) C').numpy())
+            sem -= self.pca.sem_bias
+            sem /= self.pca.sem_scale
+            sem = rearrange(sem, '(N H W) C -> N H W C', **vgg.target_size._asdict())
+            sem = torch.from_numpy(sem)
+        self.all_sems.append(sem)
+
     @torch.no_grad()
     def read_meta(self, semantic_type):
         if semantic_type and semantic_type != 'None':  # and self.split == 'train'
@@ -71,38 +102,14 @@ class BlenderDataset(Dataset):
         img_eval_interval = 1 if self.N_vis < 0 else len(self.meta['frames']) // self.N_vis
         idxs = list(range(0, len(self.meta['frames']), img_eval_interval))
         for i in tqdm(idxs, desc=f'Loading data {self.split} ({len(idxs)})'):  # img_list:#
-
             frame = self.meta['frames'][i]
             pose = np.array(frame['transform_matrix']) @ self.blender2opencv
             c2w = torch.FloatTensor(pose)
-            self.poses += [c2w]
-
-            image_path = os.path.join(self.root_dir, f"{frame['file_path']}.png")
-            self.image_paths += [image_path]
-            img = Image.open(image_path)
-
-            if self.downsample != 1.0:
-                img = img.resize(self.img_wh, Image.LANCZOS)
-
-            img = self.transform(img)  # (4, h, w)
-            img = img[:3] * img[-1:] + (1 - img[-1:])  # blend A to RGB
-
-            if vgg:
-                with torch.no_grad():
-                    sem = rearrange(vgg(img.cuda()), 'N C H W -> N H W C').cpu()
-                if self.pca:
-                    sem = self.pca.transform(rearrange(sem, 'N H W C -> (N H W) C').numpy())
-                    sem -= self.pca.sem_bias
-                    sem /= self.pca.sem_scale
-                    sem = rearrange(sem, '(N H W) C -> N H W C', **vgg.target_size._asdict())
-                    sem = torch.from_numpy(sem)
-                self.all_sems.append(sem)
-
-            img = rearrange(img, 'c h w -> (h w) c')  # RGBA
-            self.all_rgbs += [img]
+            self.poses.append(c2w)
+            self.read_semantic(self.read_frame(frame['file_path']), vgg)
 
             rays_o, rays_d = get_rays(self.directions, c2w)  # both (h*w, 3)
-            self.all_rays += [torch.cat([rays_o, rays_d], 1)]  # (h*w, 6)
+            self.all_rays.append(torch.cat([rays_o, rays_d], 1))  # (h*w, 6)
 
         self.poses = torch.stack(self.poses)
         if not self.is_stack:
