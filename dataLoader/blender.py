@@ -1,7 +1,6 @@
 import json
 import os
 
-import kornia.filters.laplacian
 from PIL import Image
 from einops import rearrange
 from torch.nn import functional as F
@@ -51,7 +50,7 @@ class BlenderDataset(Dataset):
         if img.size(0) == 4:
             img = img[:3] * img[-1:] + (1 - img[-1:])  # blend A to RGB
 
-        img, = kornia.filters.laplacian(img[None], 3)
+        # img, = kornia.filters.laplacian(img[None], 3)
         self.all_rgbs.append(rearrange(img, 'c h w -> (h w) c'))  # RGBA
         return img
 

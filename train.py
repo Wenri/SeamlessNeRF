@@ -25,7 +25,8 @@ class SimpleSampler:
     def __init__(self, train_dataset, batch):
         total = train_dataset.all_rays.shape[0]
         w, h = train_dataset.img_wh
-        self.rgb_shape = (train_dataset.all_sems.shape[0], h, w) if len(train_dataset.all_sems) else None
+        has_sems = len(getattr(train_dataset, 'all_sems', ()))
+        self.rgb_shape = (train_dataset.all_sems.shape[0], h, w) if has_sems else None
         self.dataset = train_dataset
         self.batch = batch
         self.curr = total
@@ -64,7 +65,7 @@ class Trainer:
         self.train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False,
                                      semantic_type=args.semantic_type)
         self.test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True,
-                                    semantic_type=args.semantic_type, pca=self.train_dataset.pca)
+                                    semantic_type=args.semantic_type, pca=getattr(self.train_dataset, 'pca', None))
 
         # init parameters
         # tensorVM, renderer = init_parameters(args, train_dataset.scene_bbox.to(device), reso_list[0])
@@ -76,7 +77,7 @@ class Trainer:
         self.palette, self.hull_vertices = self.build_palette(
             bg=np.zeros((3,), dtype=np.float32) if reg_weights._field_defaults['BLACK'] > 0 else None)
         self.losses = args.lossMode(self.hull_vertices, self.device)
-        if len(self.train_dataset.all_sems):
+        if len(getattr(self.train_dataset, 'all_sems', ())):
             self.palette_sem = self.build_sem_palette(len(self.palette))
             print(self.palette_sem)
         else:
