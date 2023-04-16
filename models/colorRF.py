@@ -4,26 +4,45 @@ from .renderBase import MLPRender_Fea
 from .tensoRF import TensorVMSplit
 
 
-class NormalizeCoord:
-    def __init__(self, xyz_sampled):
+class NormalizeCoordMasked:
+    def __init__(self, pts, valid_mask):
         super().__init__()
-        self.xyz_sampled = xyz_sampled
-        self.valid_mask = None
-        self.idx = torch.empty(*xyz_sampled.shape[:-1], dtype=torch.int64, device=xyz_sampled.device)
-        self.idx.fill_(-1)
-
-    def __getitem__(self, item):
-        self.valid_mask = item
-        return self
+        self._pts = pts
+        self.valid_mask = valid_mask
 
     def get_masked_array(self):
-        return self.xyz_sampled[self.valid_mask]
+        return self._pts.normalize_array()[self.valid_mask]
+
+    def adj_coord(self, func):
+        return NormalizeCoordMasked(self._pts.adj_coord(func), self.valid_mask)
 
     def get_masked_index(self):
-        return self.idx[self.valid_mask]
+        return self._pts.idx[self.valid_mask]
 
     def set_masked_index(self, idx):
-        self.idx[self.valid_mask] = idx
+        self._pts.idx[self.valid_mask] = idx
+
+
+class NormalizeCoord:
+    def __init__(self, func, xyz_sampled):
+        super().__init__()
+        self.func = func
+        if isinstance(xyz_sampled, NormalizeCoord):
+            self.xyz_sampled = xyz_sampled.xyz_sampled
+            self.idx = xyz_sampled.idx
+        else:
+            self.xyz_sampled = xyz_sampled
+            self.idx = torch.empty(*xyz_sampled.shape[:-1], dtype=torch.int64, device=xyz_sampled.device)
+            self.idx.fill_(-1)
+
+    def __getitem__(self, item):
+        return NormalizeCoordMasked(self, item)
+
+    def normalize_array(self):
+        return self.func(self.xyz_sampled)
+
+    def adj_coord(self, func):
+        return NormalizeCoord(func, self)
 
 
 class ColorVMSplit(TensorVMSplit):
@@ -35,30 +54,44 @@ class ColorVMSplit(TensorVMSplit):
         return super().init_render_func(shadingMode, pos_pe, view_pe, fea_pe, featureC, **kwargs)
 
     def normalize_coord(self, xyz_sampled):
-        return NormalizeCoord(xyz_sampled)
+        return NormalizeCoord(super().normalize_coord, xyz_sampled)
+
+    def adjust_coord(self, xyz_sampled):
+        xyz_sampled = self.shift_and_scale(xyz_sampled)
+        return super().normalize_coord(xyz_sampled)
+
+    def shift_and_scale(self, xyz_sampled):
+        from scipy.spatial.transform import Rotation as R
+        r = R.from_euler('z', 90, degrees=True)
+        r = torch.as_tensor(r.as_matrix(), dtype=xyz_sampled.dtype, device=xyz_sampled.device)
+        xyz_sampled = xyz_sampled * 2
+        xyz_sampled = xyz_sampled - torch.tensor([0, 1.5, -1], dtype=xyz_sampled.dtype, device=xyz_sampled.device)
+        return xyz_sampled @ r
 
     def compute_validmask(self, xyz_sampled: torch.Tensor):
         ray_valid = super().compute_validmask(xyz_sampled)
         for model in self.merge_target:
-            ray_valid |= model.compute_validmask(xyz_sampled)
+            ray_valid |= model.compute_validmask(model.shift_and_scale(xyz_sampled))
+            ray_valid |= torch.ones_like(ray_valid, dtype=torch.bool, device=ray_valid.device)
         return ray_valid
 
-    def compute_densityfeature(self, xyz_sampled: NormalizeCoord):
+    def compute_densityfeature(self, xyz_sampled: NormalizeCoordMasked):
+        density = super().compute_densityfeature(xyz_sampled.get_masked_array())
         if len(self.merge_target) == 0:
-            return super().compute_densityfeature(super().normalize_coord(xyz_sampled.get_masked_array()))
+            return density
 
-        density = [model.compute_densityfeature(xyz_sampled) for model in self.merge_target]
-        density = [super().compute_densityfeature(super().normalize_coord(xyz_sampled.get_masked_array()))] + density
+        tgt = [model.compute_densityfeature(xyz_sampled.adj_coord(model.adjust_coord)) for model in self.merge_target]
+        density = [density] + tgt
         density, idx = torch.stack(density, dim=0).max(dim=0)
         xyz_sampled.set_masked_index(idx)
         return density
 
-    def compute_radiance(self, pts: NormalizeCoord, viewdirs):
+    def compute_radiance(self, pts: NormalizeCoordMasked, viewdirs):
+        rgb = super().compute_radiance(pts.get_masked_array(), viewdirs)
         if len(self.merge_target) == 0:
-            return super().compute_radiance(super().normalize_coord(pts.get_masked_array()), viewdirs)
+            return rgb
 
-        tgt, = [model.compute_radiance(pts, viewdirs) for model in self.merge_target]
-        rgb = super().compute_radiance(super().normalize_coord(pts.get_masked_array()), viewdirs)
+        tgt, = [model.compute_radiance(pts.adj_coord(model.adjust_coord), viewdirs) for model in self.merge_target]
         idx = pts.get_masked_index()
         rgb = torch.where((idx == 0).unsqueeze(-1), rgb, tgt)
         return rgb
