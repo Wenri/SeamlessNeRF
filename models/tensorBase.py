@@ -174,8 +174,7 @@ class TensorBase(torch.nn.Module):
             interpx += torch.rand_like(interpx).to(rays_o) * ((far - near) / N_samples)
 
         rays_pts = rays_o[..., None, :] + rays_d[..., None, :] * interpx[..., None]
-        mask_outbbox = ((self.aabb[0] > rays_pts) | (rays_pts > self.aabb[1])).any(dim=-1)
-        return rays_pts, interpx, ~mask_outbbox
+        return rays_pts, interpx
 
     def sample_ray(self, rays_o, rays_d, is_train=True, N_samples=-1):
         N_samples = N_samples if N_samples > 0 else self.nSamples
@@ -194,9 +193,7 @@ class TensorBase(torch.nn.Module):
         interpx = (t_min[..., None] + step)
 
         rays_pts = rays_o[..., None, :] + rays_d[..., None, :] * interpx[..., None]
-        mask_outbbox = ((self.aabb[0] > rays_pts) | (rays_pts > self.aabb[1])).any(dim=-1)
-
-        return rays_pts, interpx, ~mask_outbbox
+        return rays_pts, interpx
 
     def shrink(self, new_aabb, voxel_size):
         pass
@@ -244,6 +241,17 @@ class TensorBase(torch.nn.Module):
         total = torch.sum(alpha)
         print(f"bbox: {xyz_min, xyz_max} alpha rest %%%f" % (total / total_voxels * 100))
         return new_aabb
+
+    def compute_validmask(self, xyz_sampled: torch.Tensor):
+        mask = ((self.aabb[0] > xyz_sampled) | (xyz_sampled > self.aabb[1])).any(dim=-1)
+        ray_valid = ~mask
+        if self.alphaMask is not None:
+            alphas = self.alphaMask.sample_alpha(xyz_sampled[ray_valid])
+            alpha_mask = alphas > 0
+            ray_invalid = ~ray_valid
+            ray_invalid[ray_valid] |= (~alpha_mask)
+            ray_valid = ~ray_invalid
+        return ray_valid
 
     @torch.no_grad()
     def filtering_rays(self, all_rays, N_samples=256, chunk=10240 * 5, bbox_only=False):
@@ -313,25 +321,19 @@ class TensorBase(torch.nn.Module):
         # sample points
         viewdirs = rays_chunk[:, 3:6]
         if ndc_ray:
-            xyz_sampled, z_vals, ray_valid = self.sample_ray_ndc(rays_chunk[:, :3], viewdirs, is_train=is_train,
-                                                                 N_samples=N_samples)
+            xyz_sampled, z_vals = self.sample_ray_ndc(rays_chunk[:, :3], viewdirs, is_train=is_train,
+                                                      N_samples=N_samples)
             dists = torch.cat((z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
             rays_norm = torch.norm(viewdirs, dim=-1, keepdim=True)
             dists = dists * rays_norm
             viewdirs = viewdirs / rays_norm
         else:
-            xyz_sampled, z_vals, ray_valid = self.sample_ray(rays_chunk[:, :3], viewdirs, is_train=is_train,
-                                                             N_samples=N_samples)
+            xyz_sampled, z_vals = self.sample_ray(rays_chunk[:, :3], viewdirs, is_train=is_train,
+                                                  N_samples=N_samples)
             dists = torch.cat((z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
         viewdirs = viewdirs.view(-1, 1, 3).expand(xyz_sampled.shape)
 
-        if self.alphaMask is not None:
-            alphas = self.alphaMask.sample_alpha(xyz_sampled[ray_valid])
-            alpha_mask = alphas > 0
-            ray_invalid = ~ray_valid
-            ray_invalid[ray_valid] |= (~alpha_mask)
-            ray_valid = ~ray_invalid
-
+        ray_valid = self.compute_validmask(xyz_sampled)
         sigma = torch.zeros(xyz_sampled.shape[:-1], device=xyz_sampled.device)
         rgb = torch.zeros((*xyz_sampled.shape[:2], self.n_dim), device=xyz_sampled.device)
 

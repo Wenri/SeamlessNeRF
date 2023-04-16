@@ -25,10 +25,9 @@ class Merger:
         self.args = args
         self.logger = logging.getLogger(type(self).__name__)
 
-    def build_network(self):
+    def build_network(self, ckpt=None):
         args = self.args
-        ckpt = args.ckpt
-        if not ckpt and args.render_only:
+        if not ckpt:
             ckpt = Path(args.basedir, args.expname) / f'{args.expname}.th'
 
         if not os.path.exists(ckpt):
@@ -60,12 +59,7 @@ class Merger:
         white_bg = self.test_dataset.white_bg
         ndc_ray = args.ndc_ray
 
-        if args.ckpt is not None:
-            logfolder = Path(os.path.dirname(args.ckpt), args.expname)
-            if not os.path.exists(args.ckpt):
-                self.logger.warning('the ckpt path does not exists!!')
-        else:
-            logfolder = Path(args.basedir, args.expname)
+        logfolder = Path(args.basedir, args.expname)
 
         PSNRs_test = None
         if args.render_train:
@@ -91,6 +85,12 @@ class Merger:
 
         return PSNRs_test or PSNRs_path
 
+    @torch.no_grad()
+    def merge(self):
+        tensorf = self.build_network()
+        tensorf.merge_target.append(self.build_network(self.args.ckpt))
+        self.render_test(tensorf)
+
 
 def config_parser(parser):
     from dataLoader import dataset_dict
@@ -109,8 +109,7 @@ def config_parser(parser):
     # network decoder
     parser.add_argument("--semantic_type", type=str, default='None', help='semantic type')
 
-    parser.add_argument("--ckpt", type=str, default=None,
-                        help='specific weights npy file to reload for coarse network')
+    parser.add_argument("--ckpt", type=str, default=None, help='specific weights npy file to reload for coarse network')
     parser.add_argument("--render_only", action="store_true")
     parser.add_argument("--render_test", action="store_true")
     parser.add_argument("--render_train", action="store_true")
@@ -131,4 +130,4 @@ def main(args):
 
     assert args.render_only
 
-    merger.render_test(merger.build_network())
+    merger.merge()

@@ -2,7 +2,7 @@ dataset_name = blender
 datadir = ../nerf-pytorch/data/nerf_synthetic/ship
 expname = merge_lego_over_ship
 basedir = ./log
-
+ckpt = ./ref/tensorf_lego_VM_2/tensorf_lego_VM_2.th
 N_vis = 5
 
 render_test = 1
