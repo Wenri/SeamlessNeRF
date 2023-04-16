@@ -35,8 +35,11 @@ class PLTLoss(LossBase):
     RegWeights_t = namedtuple('RegWeights_PLT_t', 'E_opaque PD BLACK', defaults=(.1, 1., -1. / 375))
 
     def __init__(self, hull_vertices, device, **reg_weights):
-        self.hull = ConvexHull(hull_vertices)
-        self.de = Delaunay(hull_vertices)
+        if hull_vertices.size:
+            self.hull = ConvexHull(hull_vertices)
+            self.de = Delaunay(hull_vertices)
+        else:
+            self.hull = self.de = None
         self.hull_vertices = torch.from_numpy(hull_vertices).to(device, dtype=torch.float32)
         self.ones = torch.ones((1, 1), device=device)
         super().__init__(**reg_weights)

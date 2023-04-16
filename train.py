@@ -74,8 +74,8 @@ class Trainer:
         self.reso_mask = None
         self.nSamples = min(args.nSamples, cal_n_samples(self.reso_cur, args.step_ratio))
         reg_weights: LossBase.RegWeights_t = args.lossMode.RegWeights_t
-        self.palette, self.hull_vertices = self.build_palette(
-            bg=np.zeros((3,), dtype=np.float32) if reg_weights._field_defaults['BLACK'] > 0 else None)
+        self.palette, self.hull_vertices = self.build_palette(args.palette_type, bg=np.zeros(
+            (3,), dtype=np.float32) if reg_weights._field_defaults['BLACK'] > 0 else None)
         self.losses = args.lossMode(self.hull_vertices, self.device)
         if len(getattr(self.train_dataset, 'all_sems', ())):
             self.palette_sem = self.build_sem_palette(len(self.palette))
@@ -107,7 +107,10 @@ class Trainer:
         self.trainingSampler = None
         self.logger = logging.getLogger(type(self).__name__)
 
-    def build_palette(self, simplify=True, bg=None):
+    def build_palette(self, palette_type, simplify=True, bg=None):
+        if not palette_type:
+            return (), np.empty((0, 3))
+
         rgbs = self.train_dataset.all_rgbs
         if self.train_dataset.white_bg:
             fg = torch.lt(rgbs, 1.).any(dim=-1)
@@ -146,13 +149,19 @@ class Trainer:
         n_lamb_sigma = args.n_lamb_sigma
         n_lamb_sh = args.n_lamb_sh
         near_far = self.train_dataset.near_far
-        if args.ckpt is not None:
-            ckpt = torch.load(args.ckpt, map_location=self.device)
+        ckpt = args.ckpt
+        if not ckpt and args.render_only:
+            ckpt = Path(args.basedir, args.expname) / f'{args.expname}.th'
+
+        if os.path.exists(ckpt):
+            ckpt = torch.load(ckpt, map_location=self.device)
             kwargs = ckpt['kwargs']
             kwargs.update({'device': self.device,
                            'palette': self.pick_palette()})
             tensorf = args.model_name(**kwargs)
             tensorf.load(ckpt)
+        elif args.rander_only:
+            raise RuntimeError('the ckpt path does not exists!!')
         else:
             palette = self.palette
             if self.palette_sem is not None:
@@ -350,10 +359,14 @@ class Trainer:
 
         if self.summary_writer is not None:
             logfolder = Path(self.summary_writer.log_dir)
-        else:
+        elif args.ckpt is not None:
             logfolder = Path(os.path.dirname(args.ckpt), args.expname)
             if not os.path.exists(args.ckpt):
                 self.logger.warning('the ckpt path does not exists!!')
+        else:
+            logfolder = Path(args.basedir, args.expname)
+            if args.add_timestamp:
+                logfolder = logfolder / datetime.now().strftime("-%Y%m%d-%H%M%S")
 
         PSNRs_test = None
         if args.render_train:

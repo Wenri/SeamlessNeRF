@@ -100,7 +100,7 @@ def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, pr
                 l_alex.append(l_a)
                 l_vgg.append(l_v)
 
-        if len(test_dataset.all_sems):
+        if len(getattr(test_dataset, 'all_sems', ())):
             c1, c2 = torch.ones(test_dataset.all_rgbs.shape[1:-1], dtype=torch.bool).nonzero(as_tuple=True)
             c0 = torch.full_like(c1, idxs[idx])
             coord = torch.stack((c0, c1, c2), dim=-1)

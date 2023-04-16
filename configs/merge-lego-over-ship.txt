@@ -1,6 +1,6 @@
 dataset_name = blender
 datadir = ../nerf-pytorch/data/nerf_synthetic/ship
-expname = tensorf_ship_VM_nosem
+expname = merge_lego_over_ship
 basedir = ./log
 
 n_iters = 30000

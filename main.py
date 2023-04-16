@@ -5,6 +5,7 @@ def config_parser(cmd=None):
     from models import MODEL_ZOO, LOSS_ZOO, RENDER_ZOO
 
     parser = configargparse.ArgumentParser()
+    parser.add_argument('command', type=str, default='train', nargs='?', help='select the main command')
     parser.add_argument('--config', is_config_file=True, help='config file path')
     parser.add_argument("--expname", type=str, help='experiment name')
     parser.add_argument("--basedir", type=str, default='./log', help='where to store ckpts and logs')
@@ -61,16 +62,17 @@ def config_parser(cmd=None):
     parser.add_argument("--view_pe", type=int, default=6, help='number of pe for view')
     parser.add_argument("--fea_pe", type=int, default=6, help='number of pe for features')
     parser.add_argument("--featureC", type=int, default=128, help='hidden feature channel in MLP')
+    parser.add_argument("--palette_type", action='store_true', help='use palette for color')
     parser.add_argument("--semantic_type", type=str, default='vgg', help='semantic type')
     parser.add_argument("--lossMode", type=LOSS_ZOO.get, default='PLTLoss', choices=LOSS_ZOO)
 
     parser.add_argument("--ckpt", type=str, default=None,
                         help='specific weights npy file to reload for coarse network')
-    parser.add_argument("--render_only", type=int, default=0)
-    parser.add_argument("--render_test", type=int, default=0)
-    parser.add_argument("--render_train", type=int, default=0)
-    parser.add_argument("--render_path", type=int, default=0)
-    parser.add_argument("--export_mesh", type=int, default=0)
+    parser.add_argument("--render_only", action="store_true")
+    parser.add_argument("--render_test", action="store_true")
+    parser.add_argument("--render_train", action="store_true")
+    parser.add_argument("--render_path", action="store_true")
+    parser.add_argument("--export_mesh", action="store_true")
 
     # rendering options
     parser.add_argument('--lindisp', default=False, action="store_true", help='use disparity depth sampling')
@@ -96,6 +98,19 @@ def config_parser(cmd=None):
     parser.add_argument("--vis_every", type=int, default=10000, help='frequency of visualize the image')
 
     return parser.parse_args(cmd)
+
+
+def command(args):
+    match args.command:
+        case 'train':
+            import train
+            func = train.main
+        case 'merge':
+            import merge
+            func = merge.main
+        case _:
+            raise ValueError(f'Unknown command: {args.command}')
+    return func(args)
 
 
 # A function to set up the running environment for the training
@@ -125,8 +140,7 @@ def setup_environment(cudaMallocAsync=True):
     import pyximport
     pyximport.install()
 
-    import train
-    return train.main
+    return command
 
 
 if __name__ == "__main__":

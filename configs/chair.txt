@@ -1,6 +1,6 @@
 dataset_name = blender
-datadir = ../nerf-pytorch/data/nerf_synthetic/ship
-expname = tensorf_ship_VM_nosem
+datadir = ../nerf-pytorch/data/nerf_synthetic/chair
+expname = tensorf_chair_VM
 basedir = ./log
 
 n_iters = 30000
@@ -21,7 +21,7 @@ n_lamb_sh = [48,48,48]
 model_name = ColorVMSplit
 
 
-shadingMode = MLP_Fea
+shadingMode = PoissonMLPRender
 fea2denseAct = softplus
 semantic_type = None
 
