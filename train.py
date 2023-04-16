@@ -153,14 +153,14 @@ class Trainer:
         if not ckpt and args.render_only:
             ckpt = Path(args.basedir, args.expname) / f'{args.expname}.th'
 
-        if os.path.exists(ckpt):
+        if ckpt is not None and os.path.exists(ckpt):
             ckpt = torch.load(ckpt, map_location=self.device)
             kwargs = ckpt['kwargs']
             kwargs.update({'device': self.device,
                            'palette': self.pick_palette()})
             tensorf = args.model_name(**kwargs)
             tensorf.load(ckpt)
-        elif args.rander_only:
+        elif args.render_only:
             raise RuntimeError('the ckpt path does not exists!!')
         else:
             palette = self.palette
