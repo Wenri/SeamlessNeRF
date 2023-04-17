@@ -1,0 +1,19 @@
+dataset_name = llff
+datadir = ../nerf-pytorch/data/nerf_llff_data/room
+expname =  tensorf_room_VM
+basedir = ./log
+
+downsample_test = 4.0
+ndc_ray = 1
+
+tgt_rot = [0, 0, -90]
+tgt_trans = [0, -2, 2]
+tgt_scale = 0.3
+
+ckpt = ./ref/tensorf_lego_VM_2/tensorf_lego_VM_2.th
+N_vis = 5
+
+render_only = 1
+render_test = 1
+
+model_name = ColorVMSplit

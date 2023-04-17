@@ -48,6 +48,7 @@ class NormalizeCoord:
 class ColorVMSplit(TensorVMSplit):
     def __init__(self, *args, **kwargs):
         self.merge_target = []
+        self.args = None
         super().__init__(*args, **kwargs)
 
     def init_render_func(self, shadingMode, pos_pe=6, view_pe=6, fea_pe=6, featureC=128, *args, **kwargs):
@@ -62,10 +63,11 @@ class ColorVMSplit(TensorVMSplit):
 
     def shift_and_scale(self, xyz_sampled):
         from scipy.spatial.transform import Rotation as R
-        r = R.from_euler('zyx', [90, 0, 0], degrees=True)
+        r = R.from_euler('zyx', self.args.tgt_rot, degrees=True)
         r = torch.as_tensor(r.as_matrix(), dtype=xyz_sampled.dtype, device=xyz_sampled.device)
-        xyz_sampled = xyz_sampled / 0.65
-        xyz_sampled = xyz_sampled - torch.tensor([0.1, 1.0, -0.5], dtype=xyz_sampled.dtype, device=xyz_sampled.device)
+        xyz_sampled = xyz_sampled / self.args.tgt_scale
+        xyz_sampled = xyz_sampled - torch.tensor(self.args.tgt_trans, dtype=xyz_sampled.dtype,
+                                                 device=xyz_sampled.device)
         return xyz_sampled @ r
 
     def compute_validmask(self, xyz_sampled: torch.Tensor):
@@ -95,6 +97,13 @@ class ColorVMSplit(TensorVMSplit):
         idx = pts.get_index()
         rgb = torch.where((idx == 0).unsqueeze(-1), rgb, tgt)
         return rgb
+
+    def forward(self, *params, args=None, **kwargs):
+        if args is not None:
+            self.args = args
+            for model in self.merge_target:
+                model.args = args
+        return super().forward(*params, **kwargs)
 
 
 class PoissonMLPRender(MLPRender_Fea):

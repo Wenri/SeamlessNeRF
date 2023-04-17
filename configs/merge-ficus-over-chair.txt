@@ -1,0 +1,15 @@
+dataset_name = blender
+datadir = ../nerf-pytorch/data/nerf_synthetic/chair
+expname = merge_ficus_over_chair
+basedir = ./log
+ckpt = ./ref/tensorf_ficus_VM_2/tensorf_ficus_VM_2.th
+N_vis = 5
+
+tgt_rot = [0, 0, 0]
+tgt_trans = [0, 0, 0]
+tgt_scale = 0.65
+
+render_only = 1
+render_test = 1
+
+model_name = ColorVMSplit

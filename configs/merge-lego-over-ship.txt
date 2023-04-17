@@ -5,6 +5,11 @@ basedir = ./log
 ckpt = ./ref/tensorf_lego_VM_2/tensorf_lego_VM_2.th
 N_vis = 5
 
+tgt_rot = [90, 0, 0]
+tgt_trans = [0.1, 1.0, -0.5]
+tgt_scale = 0.65
+
+render_only = 1
 render_test = 1
 
 model_name = ColorVMSplit

@@ -102,6 +102,9 @@ def config_parser(parser):
     parser.add_argument("--datadir", type=str, default='./data/llff/fern', help='input data directory')
 
     parser.add_argument('--downsample_test', type=float, default=1.0)
+    parser.add_argument('--tgt_rot', type=float, nargs='+', default=[0., 0., 0.])
+    parser.add_argument('--tgt_trans', type=float, nargs='+', default=[0., 0., 0.])
+    parser.add_argument('--tgt_scale', type=float, default=1.0)
 
     parser.add_argument('--model_name', type=MODEL_ZOO.get, default='TensorVMSplit', choices=MODEL_ZOO)
     parser.add_argument('--dataset_name', type=str, default='blender', choices=dataset_dict.keys())

@@ -275,7 +275,7 @@ class TensorBase(torch.nn.Module):
                 mask_inbbox = t_max > t_min
 
             else:
-                xyz_sampled, _, _ = self.sample_ray(rays_o, rays_d, N_samples=N_samples, is_train=False)
+                xyz_sampled, _ = self.sample_ray(rays_o, rays_d, N_samples=N_samples, is_train=False)
                 mask_inbbox = (self.alphaMask.sample_alpha(xyz_sampled).view(xyz_sampled.shape[:-1]) > 0).any(-1)
 
             mask_filtered.append(mask_inbbox.cpu())
@@ -298,7 +298,7 @@ class TensorBase(torch.nn.Module):
             alphas = self.alphaMask.sample_alpha(xyz_locs)
             alpha_mask = alphas > 0
         else:
-            alpha_mask = torch.ones_like(xyz_locs[:, 0], dtype=bool)
+            alpha_mask = torch.ones_like(xyz_locs[:, 0], dtype=torch.bool)
 
         sigma = torch.zeros(xyz_locs.shape[:-1], device=xyz_locs.device)
 

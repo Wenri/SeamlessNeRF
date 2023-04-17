@@ -15,14 +15,14 @@ from utils import visualize_depth_numpy
 
 
 def OctreeRender_trilinear_fast(rays, tensorf, chunk=4096, N_samples=-1, ndc_ray=False, white_bg=True, is_train=False,
-                                device='cuda'):
+                                device='cuda', **kwargs):
     rgbs, alphas, depth_maps, weights, uncertainties = [], [], [], [], []
     N_rays_all = rays.shape[0]
     for chunk_idx in range(N_rays_all // chunk + int(N_rays_all % chunk > 0)):
         rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk].to(device)
 
         rgb_map, depth_map = tensorf(rays_chunk, is_train=is_train, white_bg=white_bg, ndc_ray=ndc_ray,
-                                     N_samples=N_samples)
+                                     N_samples=N_samples, **kwargs)
 
         rgbs.append(rgb_map)
         depth_maps.append(depth_map)
@@ -81,7 +81,7 @@ def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, pr
         rays = samples.view(-1, samples.shape[-1])
 
         plt_map, _, depth_map, _, _ = renderer(rays, tensorf, chunk=4096, N_samples=N_samples,
-                                               ndc_ray=ndc_ray, white_bg=white_bg, device=device)
+                                               ndc_ray=ndc_ray, white_bg=white_bg, device=device, args=args)
         rgb_map = plt_map[..., :3].clamp(0.0, 1.0)
         rgb_map, depth_map = rgb_map.reshape(H, W, 3).cpu(), depth_map.reshape(H, W).cpu()
         gt_vis = []
