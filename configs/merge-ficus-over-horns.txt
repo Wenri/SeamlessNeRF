@@ -1,6 +1,6 @@
 dataset_name = llff
-datadir = ../nerf-pytorch/data/nerf_llff_data/room
-expname =  tensorf_room_VM
+datadir = ../nerf-pytorch/data/nerf_llff_data/horns
+expname =  merge_ficus_over_horns
 basedir = ./log
 
 downsample_test = 4.0
@@ -10,7 +10,7 @@ tgt_rot = [0, 0, -90]
 tgt_trans = [0, 0, 0]
 tgt_scale = 0.5
 
-ckpt = ./ref/tensorf_lego_VM_2/tensorf_lego_VM_2.th
+ckpt = ./ref/tensorf_ficus_VM_2/tensorf_ficus_VM_2.th
 N_vis = 5
 
 render_only = 1

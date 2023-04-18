@@ -83,8 +83,20 @@ class ColorVMSplit(TensorVMSplit):
             return density
 
         tgt = [model.compute_densityfeature(xyz_sampled.adj_coord(model.adjust_coord)) for model in self.merge_target]
-        density = [density] + tgt
-        density, idx = torch.stack(density, dim=0).max(dim=0)
+        density = [xyz_sampled, density] + tgt
+        # density, idx = torch.stack(density, dim=0).max(dim=0)
+        # xyz_sampled.set_index(idx)
+        return density
+
+    def feature2density(self, feature):
+        if len(self.merge_target) == 0:
+            return super().feature2density(feature)
+
+        xyz_sampled, this_den, tgt_den = feature
+        tgt, = self.merge_target
+        this_den = super().feature2density(this_den)
+        tgt_den = tgt.feature2density(tgt_den)
+        density, idx = torch.stack([this_den, tgt_den], dim=0).max(dim=0)
         xyz_sampled.set_index(idx)
         return density
 
@@ -95,7 +107,7 @@ class ColorVMSplit(TensorVMSplit):
 
         tgt, = [model.compute_radiance(pts.adj_coord(model.adjust_coord), viewdirs) for model in self.merge_target]
         idx = pts.get_index()
-        rgb = torch.where((idx == 0).unsqueeze(-1), rgb, tgt)
+        rgb = torch.where((idx > 0.5).unsqueeze(-1), tgt, rgb)
         return rgb
 
     def forward(self, *params, args=None, **kwargs):
