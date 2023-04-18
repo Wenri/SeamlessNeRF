@@ -1,4 +1,5 @@
 from collections import UserList
+from functools import partial
 
 import torch
 
@@ -9,17 +10,20 @@ from .tensoRF import TensorVMSplit
 class NormalizeCoordMasked:
     def __init__(self, pts, valid_mask):
         super().__init__()
-        self._pts = pts
+        self.pts = pts
         self.valid_mask = valid_mask
 
     def get_array(self):
-        return self._pts.get_array()[self.valid_mask]
+        return self.pts.get_array()[self.valid_mask]
 
     def adj_coord(self, func):
-        return NormalizeCoordMasked(self._pts.adj_coord(func), self.valid_mask)
+        return NormalizeCoordMasked(self.pts.adj_coord(func), self.valid_mask)
 
     def get_index(self):
-        return self._pts.idx[self.valid_mask]
+        return self.pts.idx[self.valid_mask]
+
+    def set_index(self, idx):
+        self.pts.idx[self.valid_mask] = idx
 
 
 class NormalizeCoord:
@@ -44,13 +48,13 @@ class NormalizeCoord:
         return NormalizeCoord(func, self)
 
 
-class DensityFeature(NormalizeCoordMasked, UserList):
+class DensityFeature(UserList):
     def __init__(self, pts: NormalizeCoordMasked, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._pts = pts._pts
+        self.pts = pts
 
     def set_index(self, idx):
-        self._pts.idx[self._pts.valid_mask] = idx
+        self.pts.set_index(idx)
 
 
 class ColorVMSplit(TensorVMSplit):
@@ -62,12 +66,18 @@ class ColorVMSplit(TensorVMSplit):
     def init_render_func(self, shadingMode, pos_pe=6, view_pe=6, fea_pe=6, featureC=128, *args, **kwargs):
         return super().init_render_func(shadingMode, pos_pe, view_pe, fea_pe, featureC, **kwargs)
 
+    def add_merge_target(self, model):
+        if isinstance(model, type(self)):
+            self.merge_target.extend(model.merge_target)
+            model = super(type(self), model)
+        self.merge_target.append(model)
+
     def normalize_coord(self, xyz_sampled):
         return NormalizeCoord(super().normalize_coord, xyz_sampled)
 
-    def adjust_coord(self, xyz_sampled):
+    def adjust_coord(self, xyz_sampled, func):
         xyz_sampled = self.shift_and_scale(xyz_sampled)
-        return super().normalize_coord(xyz_sampled)
+        return func(xyz_sampled)
 
     def shift_and_scale(self, xyz_sampled):
         from scipy.spatial.transform import Rotation as R
@@ -81,21 +91,19 @@ class ColorVMSplit(TensorVMSplit):
     def compute_validmask(self, xyz_sampled: torch.Tensor):
         ray_valid = super().compute_validmask(xyz_sampled)
         for model in self.merge_target:
-            ray_valid |= model.compute_validmask(model.shift_and_scale(xyz_sampled))
+            ray_valid |= model.compute_validmask(self.shift_and_scale(xyz_sampled))
             # ray_valid |= torch.ones_like(ray_valid, dtype=torch.bool, device=ray_valid.device)
         return ray_valid
 
     def compute_densityfeature(self, xyz_sampled: NormalizeCoordMasked):
-        gen = (model.compute_densityfeature(xyz_sampled.adj_coord(model.adjust_coord)) for model in self.merge_target)
+        gen = (model.compute_densityfeature(xyz_sampled.adj_coord(
+            partial(self.adjust_coord, func=model.normalize_coord)).get_array()) for model in self.merge_target)
         density = DensityFeature(xyz_sampled, gen)
         density.append(super().compute_densityfeature(xyz_sampled.get_array()))
         return density
 
     def feature2density(self, feature: DensityFeature):
         density = [super().feature2density(feature.pop())]
-        if not self.merge_target:
-            return density[0]
-
         density.extend(model.feature2density(feat) for model, feat in zip(self.merge_target, feature))
         density, idx = torch.stack(density, dim=0).max(dim=0)
         feature.set_index(idx)
@@ -106,7 +114,8 @@ class ColorVMSplit(TensorVMSplit):
         if len(self.merge_target) == 0:
             return rgb
 
-        tgt, = [model.compute_radiance(pts.adj_coord(model.adjust_coord), viewdirs) for model in self.merge_target]
+        tgt, = [model.compute_radiance(pts.adj_coord(partial(
+            self.adjust_coord, func=model.normalize_coord)).get_array(), viewdirs) for model in self.merge_target]
         idx = pts.get_index()
         rgb = torch.where((idx > 0.5).unsqueeze(-1), tgt, rgb)
         return rgb
@@ -114,8 +123,6 @@ class ColorVMSplit(TensorVMSplit):
     def forward(self, *params, args=None, **kwargs):
         if args is not None:
             self.args = args
-            for model in self.merge_target:
-                model.args = args
         return super().forward(*params, **kwargs)
 
 

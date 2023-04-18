@@ -88,7 +88,7 @@ class Merger:
     @torch.no_grad()
     def merge(self):
         tensorf = self.build_network()
-        tensorf.merge_target.append(self.build_network(self.args.ckpt))
+        tensorf.add_merge_target(self.build_network(self.args.ckpt))
         self.render_test(tensorf)
 
 
