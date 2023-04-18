@@ -1,3 +1,5 @@
+from collections import UserList
+
 import torch
 
 from .renderBase import MLPRender_Fea
@@ -18,9 +20,6 @@ class NormalizeCoordMasked:
 
     def get_index(self):
         return self._pts.idx[self.valid_mask]
-
-    def set_index(self, idx):
-        self._pts.idx[self.valid_mask] = idx
 
 
 class NormalizeCoord:
@@ -43,6 +42,15 @@ class NormalizeCoord:
 
     def adj_coord(self, func):
         return NormalizeCoord(func, self)
+
+
+class DensityFeature(NormalizeCoordMasked, UserList):
+    def __init__(self, pts: NormalizeCoordMasked, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._pts = pts._pts
+
+    def set_index(self, idx):
+        self._pts.idx[self._pts.valid_mask] = idx
 
 
 class ColorVMSplit(TensorVMSplit):
@@ -78,26 +86,19 @@ class ColorVMSplit(TensorVMSplit):
         return ray_valid
 
     def compute_densityfeature(self, xyz_sampled: NormalizeCoordMasked):
-        density = super().compute_densityfeature(xyz_sampled.get_array())
-        if len(self.merge_target) == 0:
-            return density
-
-        tgt = [model.compute_densityfeature(xyz_sampled.adj_coord(model.adjust_coord)) for model in self.merge_target]
-        density = [xyz_sampled, density] + tgt
-        # density, idx = torch.stack(density, dim=0).max(dim=0)
-        # xyz_sampled.set_index(idx)
+        gen = (model.compute_densityfeature(xyz_sampled.adj_coord(model.adjust_coord)) for model in self.merge_target)
+        density = DensityFeature(xyz_sampled, gen)
+        density.append(super().compute_densityfeature(xyz_sampled.get_array()))
         return density
 
-    def feature2density(self, feature):
-        if len(self.merge_target) == 0:
-            return super().feature2density(feature)
+    def feature2density(self, feature: DensityFeature):
+        density = [super().feature2density(feature.pop())]
+        if not self.merge_target:
+            return density[0]
 
-        xyz_sampled, this_den, tgt_den = feature
-        tgt, = self.merge_target
-        this_den = super().feature2density(this_den)
-        tgt_den = tgt.feature2density(tgt_den)
-        density, idx = torch.stack([this_den, tgt_den], dim=0).max(dim=0)
-        xyz_sampled.set_index(idx)
+        density.extend(model.feature2density(feat) for model, feat in zip(self.merge_target, feature))
+        density, idx = torch.stack(density, dim=0).max(dim=0)
+        feature.set_index(idx)
         return density
 
     def compute_radiance(self, pts: NormalizeCoordMasked, viewdirs):
