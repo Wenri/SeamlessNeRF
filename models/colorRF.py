@@ -47,9 +47,15 @@ class NormalizeCoord:
     def adj_coord(self, func):
         return NormalizeCoord(func, self)
 
+    def get_index(self):
+        return self.idx
+
+    def set_index(self, idx):
+        self.idx = idx
+
 
 class DensityFeature(UserList):
-    def __init__(self, pts: NormalizeCoordMasked, *args, **kwargs):
+    def __init__(self, pts: NormalizeCoord | NormalizeCoordMasked, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.pts = pts
 
@@ -95,7 +101,7 @@ class ColorVMSplit(TensorVMSplit):
             # ray_valid |= torch.ones_like(ray_valid, dtype=torch.bool, device=ray_valid.device)
         return ray_valid
 
-    def compute_densityfeature(self, xyz_sampled: NormalizeCoordMasked):
+    def compute_densityfeature(self, xyz_sampled: NormalizeCoord | NormalizeCoordMasked):
         gen = (model.compute_densityfeature(xyz_sampled.adj_coord(
             partial(self.adjust_coord, func=model.normalize_coord)).get_array()) for model in self.merge_target)
         density = DensityFeature(xyz_sampled, gen)
@@ -109,7 +115,7 @@ class ColorVMSplit(TensorVMSplit):
         feature.set_index(idx)
         return density
 
-    def compute_radiance(self, pts: NormalizeCoordMasked, viewdirs):
+    def compute_radiance(self, pts: NormalizeCoord | NormalizeCoordMasked, viewdirs):
         rgb = super().compute_radiance(pts.get_array(), viewdirs)
         if len(self.merge_target) == 0:
             return rgb
