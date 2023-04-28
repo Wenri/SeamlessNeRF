@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 from collections import defaultdict
+from contextlib import nullcontext, suppress
 from datetime import datetime
 from pathlib import Path
 
@@ -324,14 +325,15 @@ class Trainer:
                 REGs.clear()
 
             if iteration % args.vis_every == args.vis_every - 1 and args.N_vis != 0:
-                try:
-                    savePath = Path(self.summary_writer.log_dir, 'imgs_vis')
+                savePath = Path(self.summary_writer.log_dir, 'imgs_vis')
+                with nullcontext() if (gettrace := getattr(sys, 'gettrace', None)) and gettrace() is not None else \
+                        suppress(Exception):
                     PSNRs_test = evaluation(self.test_dataset, tensorf, args, self.renderer, os.fspath(savePath),
                                             N_vis=args.N_vis, prtx=f'{iteration:06d}_', N_samples=self.nSamples,
                                             white_bg=white_bg, ndc_ray=args.ndc_ray, compute_extra_metrics=False)
                     self.summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
-                except Exception as e:
-                    self.logger.warning(f'Evaluation failed: {e}')
+                # except Exception as e:
+                #     self.logger.warning(f'Evaluation failed: {e}')
 
             self.update_grid_resolution(tensorf, iteration)
 

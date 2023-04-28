@@ -316,7 +316,7 @@ class TensorBase(torch.nn.Module):
         app_features = self.compute_appfeature(pts)
         return self.renderModule(pts, viewdirs, app_features)
 
-    def forward(self, rays_chunk, white_bg=True, is_train=False, ndc_ray=False, N_samples=-1):
+    def forward(self, rays_chunk, white_bg=True, is_train=False, ndc_ray=False, N_samples=-1, **kwargs):
 
         # sample points
         viewdirs = rays_chunk[:, 3:6]

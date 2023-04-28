@@ -1,5 +1,6 @@
 import os
 import sys
+from contextlib import suppress
 from pathlib import Path
 
 import imageio
@@ -67,10 +68,8 @@ def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, pr
         palette = (getattr(tensorf.renderModule, 'palette', None),)
         plt_names = ('RGB',)
 
-    try:
+    with suppress(Exception):
         tqdm._instances.clear()
-    except Exception:
-        pass
 
     near_far = test_dataset.near_far
     img_eval_interval = 1 if N_vis < 0 else max(test_dataset.all_rays.shape[0] // N_vis, 1)
