@@ -1,10 +1,9 @@
 
 dataset_name = llff
-datadir = ../nerf-pytorch/data/nerf_llff_data/room
-expname =  tensorf_room_VM
+datadir = ./data/gbcseldb/howardzhou_004_wooden_moose
+expname =  tensorf_wooden_moose_VM
 basedir = ./log
 
-downsample_train = 4.0
 ndc_ray = 1
 
 n_iters = 25000
