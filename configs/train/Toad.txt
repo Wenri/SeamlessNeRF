@@ -1,6 +1,6 @@
 
 dataset_name = nsvf
-datadir = /home/wenri/Datasets/gbcseldb/Toad
+datadir = data/gbcseldb/Toad
 expname =  tensorf_Toad_VM
 basedir = ./log
 

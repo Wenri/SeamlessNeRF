@@ -6,7 +6,8 @@ import numpy as np
 import torch
 
 from dataLoader import dataset_dict
-from renderer import OctreeRender_trilinear_fast, evaluation, evaluation_path
+from renderer import OctreeRender_trilinear_fast
+from eval import Evaluator
 from utils import convert_sdf_samples_to_ply
 
 

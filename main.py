@@ -5,7 +5,7 @@ def config_parser(cmd=None):
 
     parser = configargparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest='command', help='sub-command help')
-    train.config_parser(subparsers.add_parser('train'))
+    train.config_parser(subparsers.add_parser('train', aliases=['test']))
     merge.config_parser(subparsers.add_parser('merge'))
 
     return parser.parse_args(cmd)
@@ -14,7 +14,7 @@ def config_parser(cmd=None):
 def command(args):
     print(args)
     match args.command:
-        case 'train':
+        case 'train' | 'test':
             import train
             func = train.main
         case 'merge':

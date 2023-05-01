@@ -15,10 +15,11 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import trange
 
 from dataLoader import dataset_dict
+from eval import Evaluator
 from models.loss import LossBase
 from models.palette.Additive_mixing_layers_extraction import Hull_Simplification_determined_version, \
     Hull_Simplification_old
-from renderer import OctreeRender_trilinear_fast, evaluation, evaluation_path
+from renderer import OctreeRender_trilinear_fast
 from utils import convert_sdf_samples_to_ply, N_to_reso, cal_n_samples, TVLoss, sort_palette
 
 
@@ -283,6 +284,7 @@ class Trainer:
 
         self.create_summary_writer()
         tensorf = self.build_network()
+        evaluator = Evaluator(args, tensorf, self.test_dataset, self.train_dataset, self.summary_writer)
 
         grad_vars = tensorf.get_optparam_groups(args.lr_init, args.lr_basis)
         self.optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.99))
@@ -328,9 +330,10 @@ class Trainer:
                 savePath = Path(self.summary_writer.log_dir, 'imgs_vis')
                 with nullcontext() if (gettrace := getattr(sys, 'gettrace', None)) and gettrace() is not None else \
                         suppress(Exception):
-                    PSNRs_test = evaluation(self.test_dataset, tensorf, args, self.renderer, os.fspath(savePath),
-                                            N_vis=args.N_vis, prtx=f'{iteration:06d}_', N_samples=self.nSamples,
-                                            white_bg=white_bg, ndc_ray=args.ndc_ray, compute_extra_metrics=False)
+                    PSNRs_test = evaluator.evaluation(
+                        self.renderer, os.fspath(savePath),
+                        N_vis=args.N_vis, prtx=f'{iteration:06d}_', N_samples=self.nSamples,
+                        white_bg=white_bg, ndc_ray=args.ndc_ray, compute_extra_metrics=False)
                     self.summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
                 # except Exception as e:
                 #     self.logger.warning(f'Evaluation failed: {e}')
@@ -338,8 +341,10 @@ class Trainer:
             self.update_grid_resolution(tensorf, iteration)
 
         tensorf.save(f'{self.summary_writer.log_dir}/{args.expname}.th')
-        PSNRs_test = self.render_test(tensorf)
+
+        PSNRs_test = evaluator.render_test(tensorf)
         self.summary_writer.add_scalar('test/psnr_all', np.mean(PSNRs_test), global_step=pbar.total)
+        return evaluator
 
     @torch.no_grad()
     def export_mesh(self):
@@ -352,47 +357,6 @@ class Trainer:
 
         alpha, _ = tensorf.getDenseAlpha()
         convert_sdf_samples_to_ply(alpha.cpu(), f'{args.ckpt[:-3]}.ply', bbox=tensorf.aabb.cpu(), level=0.005)
-
-    @torch.no_grad()
-    def render_test(self, tensorf):
-        args = self.args
-        white_bg = self.test_dataset.white_bg
-        ndc_ray = args.ndc_ray
-
-        if self.summary_writer is not None:
-            logfolder = Path(self.summary_writer.log_dir)
-        elif args.ckpt is not None:
-            logfolder = Path(os.path.dirname(args.ckpt), args.expname)
-            if not os.path.exists(args.ckpt):
-                self.logger.warning('the ckpt path does not exists!!')
-        else:
-            logfolder = Path(args.basedir, args.expname)
-            if args.add_timestamp:
-                logfolder = logfolder / datetime.now().strftime("-%Y%m%d-%H%M%S")
-
-        PSNRs_test = None
-        if args.render_train:
-            filePath = logfolder / 'imgs_train_all'
-            PSNRs_test = evaluation(self.train_dataset, tensorf, args, self.renderer, os.fspath(filePath),
-                                    N_vis=-1, N_samples=-1, white_bg=white_bg, ndc_ray=ndc_ray, device=self.device)
-            print(f'======> {args.expname} test all psnr: {np.mean(PSNRs_test)} <========================')
-
-        if args.render_test:
-            filePath = logfolder / 'imgs_test_all'
-            PSNRs_test = evaluation(self.test_dataset, tensorf, args, self.renderer, os.fspath(filePath),
-                                    N_vis=-1, N_samples=-1, white_bg=white_bg, ndc_ray=ndc_ray, device=self.device)
-            print(f'======> {args.expname} test all psnr: {np.mean(PSNRs_test)} <========================')
-
-        PSNRs_path = None
-        if args.render_path:
-            filePath = logfolder / 'imgs_path_all'
-            c2ws = self.test_dataset.render_path
-            # c2ws = test_dataset.poses
-            print('========>', c2ws.shape)
-            PSNRs_path = evaluation_path(self.test_dataset, tensorf, c2ws, self.renderer, os.fspath(filePath),
-                                         N_vis=-1, N_samples=-1, white_bg=white_bg, ndc_ray=ndc_ray, device=self.device)
-
-        return PSNRs_test or PSNRs_path
 
 
 def config_parser(parser):
@@ -497,6 +461,6 @@ def main(args):
         trainer.export_mesh()
 
     if args.render_only and (args.render_test or args.render_path):
-        trainer.render_test(trainer.build_network())
+        Evaluator(trainer.build_network(), args, trainer.test_dataset, trainer.train_dataset).render_test()
     else:
         trainer.reconstruction()
