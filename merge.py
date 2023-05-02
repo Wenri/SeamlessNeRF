@@ -27,7 +27,7 @@ class Merger(Evaluator):
             ckpt = Path(args.basedir, args.expname) / f'{args.expname}.th'
 
         if not os.path.exists(ckpt):
-            raise RuntimeError('the ckpt path does not exists!!')
+            raise RuntimeError(f'the ckpt {ckpt} does not exists!!')
 
         ckpt = torch.load(ckpt, map_location=self.device)
         kwargs = ckpt['kwargs']
@@ -38,17 +38,25 @@ class Merger(Evaluator):
         return tensorf
 
     @torch.no_grad()
-    def export_mesh(self):
+    def export_mesh(self, tensorf=None):
         args = self.args
-        tensorf = self.tensorf
+        savePath = Path(args.basedir, args.expname)
+        if tensorf is None:
+            tensorf = self.tensorf
+            savePath = savePath / args.expname
+        else:
+            prefix = args.basedir
+            savePath = savePath / os.path.basename(args.ckpt)
+        savePath = savePath.with_suffix('.ply')
         alpha, _ = tensorf.getDenseAlpha()
-        convert_sdf_samples_to_ply(alpha.cpu(), f'{args.ckpt[:-3]}.ply', bbox=tensorf.aabb.cpu(), level=0.005)
+        convert_sdf_samples_to_ply(alpha.cpu(), savePath, bbox=tensorf.aabb.cpu(), level=0.005)
 
     @torch.no_grad()
     def merge(self):
-        self.tensorf.add_merge_target(self.build_network(self.args.ckpt))
+        self.tensorf.add_merge_target(target := self.build_network(self.args.ckpt))
         self.tensorf.args = self.args
         if self.args.export_mesh:
+            self.export_mesh(target)
             self.export_mesh()
         self.render_test()
 
