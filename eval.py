@@ -169,9 +169,13 @@ class Evaluator:
     def save_video_mean(self, savePath: os.PathLike, prtx=''):
         savePath = Path(savePath)
 
-        fps = min(len(self.rgb_maps) / 5, 30)
-        imageio.mimwrite(savePath / f'{prtx}video.mp4', np.stack(self.rgb_maps), fps=fps, quality=10)
-        imageio.mimwrite(savePath / f'{prtx}depthvideo.mp4', np.stack(self.depth_maps), fps=fps, quality=10)
+        kwargs = {
+            'fps': min(len(self.rgb_maps) / 5, 30),
+            'quality': 10,
+            'macro_block_size': 8,
+        }
+        imageio.mimwrite(savePath / f'{prtx}video.mp4', self.rgb_maps, **kwargs)
+        imageio.mimwrite(savePath / f'{prtx}depthvideo.mp4', self.depth_maps, **kwargs)
 
         if self.PSNRs:
             psnr = np.mean(np.asarray(self.PSNRs))

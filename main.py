@@ -28,6 +28,8 @@ def command(args):
 # A function to set up the running environment for the training
 def setup_environment(cudaMallocAsync=True):
     import os
+    import logging
+
     from contextlib import suppress
 
     if cudaMallocAsync:
@@ -45,6 +47,8 @@ def setup_environment(cudaMallocAsync=True):
         cudnn.allow_tf32 = True
 
     torch.set_default_dtype(torch.float32)
+    if not torch.cuda.is_available():
+        logging.getLogger(__name__).warning('CUDA is not available. Using CPU instead.')
 
     # Set the seed for generating random numbers.
     np.random.seed(np.bitwise_xor(*np.atleast_1d(np.asarray(torch.seed(), dtype=np.uint64)).view(np.uint32)).item())
