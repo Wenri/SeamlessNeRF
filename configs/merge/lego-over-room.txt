@@ -1,6 +1,6 @@
 dataset_name = llff
 datadir = ../nerf-pytorch/data/nerf_llff_data/room
-expname =  tensorf_room_VM
+expname =  merge_lego_over_room
 basedir = ./log
 
 downsample_test = 4.0

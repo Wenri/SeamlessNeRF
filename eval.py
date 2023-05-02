@@ -191,12 +191,8 @@ class Evaluator:
 
         if self.summary_writer is not None:
             logfolder = Path(self.summary_writer.log_dir)
-        elif args.ckpt is not None:
-            logfolder = Path(os.path.dirname(args.ckpt), args.expname)
-            if not os.path.exists(args.ckpt):
-                self.logger.warning('the ckpt path does not exists!!')
         else:
-            logfolder = Path(args.basedir, args.expname)
+            logfolder = Path(getattr(args, 'basedir', os.path.dirname(args.ckpt)), args.expname)
             if args.add_timestamp:
                 logfolder = logfolder / datetime.now().strftime("-%Y%m%d-%H%M%S")
 

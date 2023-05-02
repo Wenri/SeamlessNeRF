@@ -6,6 +6,7 @@ from collections import defaultdict
 from contextlib import nullcontext, suppress
 from datetime import datetime
 from pathlib import Path
+from typing import Iterable
 
 import numpy as np
 import torch
@@ -284,13 +285,13 @@ class Trainer:
 
         self.create_summary_writer()
         tensorf = self.build_network()
-        evaluator = Evaluator(args, tensorf, self.test_dataset, self.train_dataset, self.summary_writer)
+        evaluator = Evaluator(tensorf, args, self.test_dataset, self.train_dataset, self.summary_writer)
 
         grad_vars = tensorf.get_optparam_groups(args.lr_init, args.lr_basis)
         self.optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.99))
 
         torch.cuda.empty_cache()
-        PSNRs, PSNRs_test = [], [0]
+        PSNRs, PSNRs_test = [], ''
         REGs = defaultdict(list)
 
         self.trainingSampler = SimpleSampler(self.train_dataset, args.batch_size)
@@ -316,7 +317,8 @@ class Trainer:
                 with io.StringIO(
                         f'Iteration {iteration:05d}:'
                         + f' train_psnr = {float(np.mean(PSNRs)):.2f}'
-                        + f' test_psnr = {float(np.mean(PSNRs_test)):.2f}'
+                        + (f' test_psnr = {float(np.mean(PSNRs_test)):.2f}' if isinstance(
+                            PSNRs_test, Iterable) and not isinstance(PSNRs_test, str) else str(PSNRs_test))
                         + f' mse = {loss:.6f}'
                 ) as s:
                     s.seek(0, io.SEEK_END)
@@ -328,21 +330,20 @@ class Trainer:
 
             if iteration % args.vis_every == args.vis_every - 1 and args.N_vis != 0:
                 savePath = Path(self.summary_writer.log_dir, 'imgs_vis')
-                with nullcontext() if (gettrace := getattr(sys, 'gettrace', None)) and gettrace() is not None else \
-                        suppress(Exception):
+                with nullcontext(True) if (gettrace := getattr(sys, 'gettrace', None)) and gettrace() is not None else \
+                        suppress(Exception) as PSNRs_test:
+                    if PSNRs_test:
+                        self.logger.info(f'Debugger is active. Skipping suppression. ')
                     PSNRs_test = evaluator.evaluation(
-                        self.renderer, os.fspath(savePath),
-                        N_vis=args.N_vis, prtx=f'{iteration:06d}_', N_samples=self.nSamples,
-                        white_bg=white_bg, ndc_ray=args.ndc_ray, compute_extra_metrics=False)
+                        os.fspath(savePath), N_vis=args.N_vis, prtx=f'{iteration:06d}_', N_samples=self.nSamples,
+                        white_bg=white_bg, ndc_ray=args.ndc_ray)
                     self.summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
-                # except Exception as e:
-                #     self.logger.warning(f'Evaluation failed: {e}')
 
             self.update_grid_resolution(tensorf, iteration)
 
         tensorf.save(f'{self.summary_writer.log_dir}/{args.expname}.th')
 
-        PSNRs_test = evaluator.render_test(tensorf)
+        PSNRs_test = evaluator.render_test()
         self.summary_writer.add_scalar('test/psnr_all', np.mean(PSNRs_test), global_step=pbar.total)
         return evaluator
 
