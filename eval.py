@@ -197,7 +197,7 @@ class Evaluator:
             logfolder = Path(self.summary_writer.log_dir)
         else:
             logfolder = Path(getattr(args, 'basedir', os.path.dirname(args.ckpt)), args.expname)
-            if args.add_timestamp:
+            if getattr(args, 'add_timestamp', None):
                 logfolder = logfolder / datetime.now().strftime("-%Y%m%d-%H%M%S")
 
         PSNRs_test = None

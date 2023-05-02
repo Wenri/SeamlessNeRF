@@ -1,0 +1,18 @@
+dataset_name = tankstemple
+datadir = ./data/gbcseldb/Family
+expname = merge_Toad_over_Family
+basedir = ./log
+ckpt = ./ref/tensorf_Toad_VM_colorVMSplit/tensorf_Toad_VM.th
+N_vis = 5
+
+tgt_rot = [0, 0, 0]
+tgt_trans = [0, 0, 0]
+tgt_scale = 0.05
+
+render_only = 1
+export_mesh = 1
+render_test = 1
+
+model_name = ColorVMSplit
+
+#####

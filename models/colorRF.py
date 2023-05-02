@@ -89,9 +89,9 @@ class ColorVMSplit(TensorVMSplit):
         from scipy.spatial.transform import Rotation as R
         r = R.from_euler('zyx', self.args.tgt_rot, degrees=True)
         r = torch.as_tensor(r.as_matrix(), dtype=xyz_sampled.dtype, device=xyz_sampled.device)
-        xyz_sampled = xyz_sampled / self.args.tgt_scale
         xyz_sampled = xyz_sampled - torch.tensor(self.args.tgt_trans, dtype=xyz_sampled.dtype,
                                                  device=xyz_sampled.device)
+        xyz_sampled = xyz_sampled / self.args.tgt_scale
         return xyz_sampled @ r
 
     def compute_validmask(self, xyz_sampled: torch.Tensor):
@@ -127,7 +127,7 @@ class ColorVMSplit(TensorVMSplit):
         return rgb
 
     def forward(self, *params, args=None, **kwargs):
-        if args is not None:
+        if self.args is None and args:
             self.args = args
         return super().forward(*params, **kwargs)
 

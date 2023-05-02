@@ -16,7 +16,7 @@ class Merger(Evaluator):
         # init dataset
         dataset = dataset_dict[args.dataset_name]
         train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_test, is_stack=False,
-                                semantic_type=args.semantic_type)
+                                semantic_type=args.semantic_type) if not args.render_only else None
         test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_test, is_stack=True,
                                semantic_type=args.semantic_type, pca=getattr(train_dataset, 'pca', None))
         super().__init__(self.build_network(), args, test_dataset, train_dataset)
@@ -40,18 +40,16 @@ class Merger(Evaluator):
     @torch.no_grad()
     def export_mesh(self):
         args = self.args
-        ckpt = torch.load(args.ckpt, map_location=self.device)
-        kwargs = ckpt['kwargs']
-        kwargs.update({'device': self.device})
-        tensorf = args.model_name(**kwargs)
-        tensorf.load(ckpt)
-
+        tensorf = self.tensorf
         alpha, _ = tensorf.getDenseAlpha()
         convert_sdf_samples_to_ply(alpha.cpu(), f'{args.ckpt[:-3]}.ply', bbox=tensorf.aabb.cpu(), level=0.005)
 
     @torch.no_grad()
     def merge(self):
         self.tensorf.add_merge_target(self.build_network(self.args.ckpt))
+        self.tensorf.args = self.args
+        if self.args.export_mesh:
+            self.export_mesh()
         self.render_test()
 
 
@@ -90,10 +88,6 @@ def config_parser(parser):
 
 
 def main(args):
-    merger = Merger(args)
-    if args.export_mesh:
-        merger.export_mesh()
-
     assert args.render_only
-
+    merger = Merger(args)
     merger.merge()
