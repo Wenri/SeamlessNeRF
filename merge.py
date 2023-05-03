@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 import torch
+from trimesh import PointCloud
 
 from dataLoader import dataset_dict
 from eval import Evaluator
@@ -45,19 +46,33 @@ class Merger(Evaluator):
             tensorf = self.tensorf
             savePath = savePath / args.expname
         else:
-            prefix = args.basedir
             savePath = savePath / os.path.basename(args.ckpt)
         savePath = savePath.with_suffix('.ply')
         alpha, _ = tensorf.getDenseAlpha()
         convert_sdf_samples_to_ply(alpha.cpu(), savePath, bbox=tensorf.aabb.cpu(), level=0.005)
 
     @torch.no_grad()
+    def export_pointcloud(self, tensorf=None):
+        args = self.args
+        savePath = Path(args.basedir, args.expname)
+        if tensorf is None:
+            tensorf = self.tensorf
+            savePath = savePath / args.expname
+        else:
+            savePath = savePath / os.path.basename(args.ckpt)
+        savePath = savePath.with_stem(savePath.stem + '_pc').with_suffix('.ply')
+        alpha, xyz = tensorf.getDenseAlpha()
+        pc = PointCloud(xyz[alpha > 0.005].cpu().numpy())
+        pc.export(savePath)
+
+    @torch.no_grad()
     def merge(self):
-        self.tensorf.add_merge_target(target := self.build_network(self.args.ckpt))
         self.tensorf.args = self.args
+        self.tensorf.add_merge_target(target := self.build_network(self.args.ckpt))
         if self.args.export_mesh:
             self.export_mesh(target)
             self.export_mesh()
+            self.export_pointcloud()
         self.render_test()
 
 

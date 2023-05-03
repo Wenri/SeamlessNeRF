@@ -1,10 +1,12 @@
 from collections import UserList
 from functools import partial
+from itertools import zip_longest
 
 import torch
 
 from .renderBase import MLPRender_Fea
 from .tensoRF import TensorVMSplit
+from .tensorBase import AlphaGridMask
 
 
 class NormalizeCoordMasked:
@@ -63,27 +65,16 @@ class DensityFeature(UserList):
         self.pts.set_index(idx)
 
 
-class ColorVMSplit(TensorVMSplit):
-    def __init__(self, *args, **kwargs):
-        self.merge_target = []
-        self.args = None
-        super().__init__(*args, **kwargs)
+class MultipleGridMask(torch.nn.ModuleList):
+    def __init__(self, args, *masks: AlphaGridMask):
+        super().__init__(masks)
+        self.args = args
 
-    def init_render_func(self, shadingMode, pos_pe=6, view_pe=6, fea_pe=6, featureC=128, *args, **kwargs):
-        return super().init_render_func(shadingMode, pos_pe, view_pe, fea_pe, featureC, **kwargs)
-
-    def add_merge_target(self, model):
-        if isinstance(model, type(self)):
-            self.merge_target.extend(model.merge_target)
-            model = super(type(self), model)
-        self.merge_target.append(model)
-
-    def normalize_coord(self, xyz_sampled):
-        return NormalizeCoord(super().normalize_coord, xyz_sampled)
-
-    def adjust_coord(self, xyz_sampled, func):
-        xyz_sampled = self.shift_and_scale(xyz_sampled)
-        return func(xyz_sampled)
+    def sample_alpha(self, xyz_sampled):
+        alpha_vals = [m.sample_alpha(f(xyz_sampled)) for m, f in
+                      zip_longest(self, (torch.nn.Identity(),), fillvalue=self.shift_and_scale)]
+        alpha_vals, idx = torch.stack(alpha_vals, dim=0).max(dim=0)
+        return alpha_vals
 
     def shift_and_scale(self, xyz_sampled):
         from scipy.spatial.transform import Rotation as R
@@ -94,10 +85,45 @@ class ColorVMSplit(TensorVMSplit):
         xyz_sampled = xyz_sampled / self.args.tgt_scale
         return xyz_sampled @ r
 
+
+class ColorVMSplit(TensorVMSplit):
+    def __init__(self, *args, **kwargs):
+        self.merge_target = []
+        self.args = None
+        super().__init__(*args, **kwargs)
+
+    def init_render_func(self, shadingMode, pos_pe=6, view_pe=6, fea_pe=6, featureC=128, *args, **kwargs):
+        return super().init_render_func(shadingMode, pos_pe, view_pe, fea_pe, featureC, **kwargs)
+
+    def add_merge_target(self, model):
+        if isinstance(self.alphaMask, AlphaGridMask):
+            self.alphaMask = MultipleGridMask(self.args, self.alphaMask)
+        elif self.alphaMask is None:
+            self.alphaMask = MultipleGridMask(self.args)
+
+        if isinstance(model.alphaMask, type(self.alphaMask)):
+            self.alphaMask.extend(model.alphaMask)
+        else:
+            self.alphaMask.append(model.alphaMask)
+
+        if isinstance(model, type(self)):
+            self.merge_target.extend(model.merge_target)
+            model = super(type(self), model)
+        self.merge_target.append(model)
+
+    def normalize_coord(self, xyz_sampled):
+        return NormalizeCoord(super().normalize_coord, xyz_sampled)
+
+    def adjust_coord(self, xyz_sampled, func):
+        shift_and_scale = getattr(self.alphaMask, 'shift_and_scale', torch.nn.Identity())
+        xyz_sampled = shift_and_scale(xyz_sampled)
+        return func(xyz_sampled)
+
     def compute_validmask(self, xyz_sampled: torch.Tensor):
         ray_valid = super().compute_validmask(xyz_sampled)
+        shift_and_scale = getattr(self.alphaMask, 'shift_and_scale', torch.nn.Identity())
         for model in self.merge_target:
-            ray_valid |= model.compute_validmask(self.shift_and_scale(xyz_sampled))
+            ray_valid |= model.compute_validmask(shift_and_scale(xyz_sampled))
             # ray_valid |= torch.ones_like(ray_valid, dtype=torch.bool, device=ray_valid.device)
         return ray_valid
 
@@ -109,9 +135,8 @@ class ColorVMSplit(TensorVMSplit):
         return density
 
     def feature2density(self, feature: DensityFeature):
-        density = [model.feature2density(feat) for model, feat in zip(self.merge_target, feature)]
-        density.append(super().feature2density(feature[-1]))
-        tgt_density = density[0]
+        density = [model.feature2density(feat) for model, feat in
+                   zip_longest(self.merge_target, feature, fillvalue=super())]
         density, idx = torch.stack(density, dim=0).max(dim=0)
         feature.set_index(idx)
         return density
