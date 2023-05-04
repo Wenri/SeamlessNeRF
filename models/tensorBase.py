@@ -316,8 +316,7 @@ class TensorBase(torch.nn.Module):
         app_features = self.compute_appfeature(pts)
         return self.renderModule(pts, viewdirs, app_features)
 
-    def forward(self, rays_chunk, white_bg=True, is_train=False, ndc_ray=False, N_samples=-1, **kwargs):
-
+    def sample_and_filter_rays(self, rays_chunk, is_train=False, ndc_ray=False, N_samples=-1):
         # sample points
         viewdirs = rays_chunk[:, 3:6]
         if ndc_ray:
@@ -332,8 +331,15 @@ class TensorBase(torch.nn.Module):
                                                   N_samples=N_samples)
             dists = torch.cat((z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
         viewdirs = viewdirs.view(-1, 1, 3).expand(xyz_sampled.shape)
-
         ray_valid = self.compute_validmask(xyz_sampled)
+
+        return xyz_sampled, z_vals, dists, viewdirs, ray_valid
+
+    def forward(self, rays_chunk, white_bg=True, is_train=False, ndc_ray=False, N_samples=-1, **kwargs):
+
+        xyz_sampled, z_vals, dists, viewdirs, ray_valid = self.sample_and_filter_rays(
+            rays_chunk, is_train=is_train, ndc_ray=ndc_ray, N_samples=N_samples)
+
         sigma = torch.zeros(xyz_sampled.shape[:-1], device=xyz_sampled.device)
         rgb = torch.zeros((*xyz_sampled.shape[:2], self.n_dim), device=xyz_sampled.device)
 

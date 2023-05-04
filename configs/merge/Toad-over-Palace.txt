@@ -10,7 +10,7 @@ tgt_trans = [0, 0, 0]
 tgt_scale = 0.6
 
 render_only = 1
-export_mesh = 1
+# export_mesh = 1
 render_test = 1
 
 model_name = ColorVMSplit
