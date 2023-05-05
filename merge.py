@@ -138,11 +138,11 @@ class Merger(Evaluator):
             np.save(ptsPath.with_stem('aval_id'), aval_id.numpy())
             np.save(ptsPath.with_stem('aval_rep'), aval_rep.numpy())
 
-        ptsPath = ptsPath.with_stem('ball_ret_dists.7')
+        ptsPath = ptsPath.with_stem('ball_ret_dists.2')
         if ptsPath.exists():
             ball_dists = rearrange(from_numpy(open_memmap(ptsPath, mode='r')), '1 (n d) k -> n d k', n=pts.shape[0])
-            ball_idx = from_numpy(open_memmap(ptsPath.with_stem('ball_ret_idx.7'), mode='r')).view(*ball_dists.shape)
-            ball_knn = from_numpy(open_memmap(ptsPath.with_stem('ball_ret_knn.7'), mode='r')).view(*ball_dists.shape, 3)
+            ball_idx = from_numpy(open_memmap(ptsPath.with_stem('ball_ret_idx.2'), mode='r')).view(*ball_dists.shape)
+            ball_knn = from_numpy(open_memmap(ptsPath.with_stem('ball_ret_knn.2'), mode='r')).view(*ball_dists.shape, 3)
         else:
             aval_rep_pts = aval_rep[None, ..., :3].cuda()
             knn_ret = knn_points(pts[None].cuda(), aval_rep_pts, K=1, return_sorted=False)
@@ -150,9 +150,12 @@ class Merger(Evaluator):
             print(knn_ret.dists.min().item(), knn_ret.dists.max().item(), median_dist)
             median_dist = max(median_dist, self.tensorf.stepSize) * 2
             ball_ret = ball_query(all_query_pts[None].cuda(), aval_rep_pts, K=40, radius=median_dist)
-            np.save(ptsPath.with_stem('ball_ret_dists.7'), ball_ret.dists.cpu().numpy())
-            np.save(ptsPath.with_stem('ball_ret_idx.7'), ball_ret.idx.cpu().numpy())
-            np.save(ptsPath.with_stem('ball_ret_knn.7'), ball_ret.knn.cpu().numpy())
+            np.save(ptsPath.with_stem('ball_ret_dists.2'), ball_ret.dists.cpu().numpy())
+            np.save(ptsPath.with_stem('ball_ret_idx.2'), ball_ret.idx.cpu().numpy())
+            np.save(ptsPath.with_stem('ball_ret_knn.2'), ball_ret.knn.cpu().numpy())
+            ball_dists = rearrange(ball_ret.dists, '1 (n d) k -> n d k', n=pts.shape[0])
+            ball_idx = ball_ret.idx.view(*ball_dists.shape)
+            ball_knn = ball_ret.knn.view(*ball_dists.shape, 3)
 
         ptsPath = ptsPath.with_stem('knn_ret_dists')
         if ptsPath.exists():
@@ -162,10 +165,12 @@ class Merger(Evaluator):
             knn_ret = knn_points(pts[None].cuda(), aval_rep[None, ..., :3].cuda(), K=100, return_sorted=True)
             np.save(ptsPath, knn_ret.dists.cpu().numpy())
             np.save(ptsPath.with_stem('knn_ret_idx'), knn_ret.idx.cpu().numpy())
+            knn_dists, knn_idx, _ = knn_ret
 
-        pts_mask = (ball_idx[:, 0] < 0).all(dim=-1)
-
-        return pts_diff
+        all_query_pts = rearrange(all_query_pts, '(n d) c -> n d c', n=pts.shape[0]).cpu()
+        pts_viewdir = aval_rep[knn_idx[:, 0], None, 3:].cpu().expand(-1, all_query_pts.shape[1], -1)
+        all_query_pts = torch.cat((all_query_pts, pts_viewdir), dim=-1)
+        return all_query_pts
 
     @torch.no_grad()
     def merge(self):
@@ -175,7 +180,7 @@ class Merger(Evaluator):
             self.export_mesh(target)
             self.export_mesh()
         pts = self.export_pointcloud()
-        self.generate_grad(pts)
+        all_query_pts = self.generate_grad(pts)
         self.render_test()
 
 
