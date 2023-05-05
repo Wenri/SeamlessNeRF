@@ -1,10 +1,12 @@
 import os
-from itertools import count
 from pathlib import Path
 
 import numpy as np
 import torch
+from einops import rearrange
 from numpy.lib.format import open_memmap
+from pytorch3d.ops import knn_points, ball_query
+from torch import from_numpy
 from trimesh import PointCloud
 
 from dataLoader import dataset_dict
@@ -75,51 +77,93 @@ class Merger(Evaluator):
         rays = torch.concat((self.alt_dataset.all_rays.view(-1, 6), self.test_dataset.all_rays.view(-1, 6)), dim=0)
         N_rays_all = rays.shape[0]
         aval_pts = []
-        aval_viewdir = []
         aval_id = []
-        ray_id = count()
+        aval_rep = []
         for chunk_idx in range(N_rays_all // chunk + int(N_rays_all % chunk > 0)):
             rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk].to(self.device)
-            rays_id = torch.from_numpy(np.fromiter(ray_id, dtype=np.int64, count=rays_chunk.shape[0]))
             xyz_sampled, z_vals, dists, viewdirs, ray_valid = self.tensorf.sample_and_filter_rays(
                 rays_chunk, is_train=False, ndc_ray=self.args.ndc_ray, N_samples=512)
             app_mask = torch.zeros_like(ray_valid)
+            app_alpha = torch.zeros_like(ray_valid, dtype=torch.float32)
             if ray_valid.any():
                 sigma_feature = self.tensorf.compute_densityfeature(
                     self.tensorf.normalize_coord(xyz_sampled)[ray_valid])
                 validsigma = self.tensorf.feature2density(sigma_feature)
                 alpha = 1. - torch.exp(-validsigma * dists[ray_valid])
                 app_mask.masked_scatter_(ray_valid, alpha > 20 * self.tensorf.rayMarch_weight_thres)
+                app_alpha.masked_scatter_(ray_valid, alpha)
             if app_mask.any():
-                aval_pts.append(xyz_sampled[app_mask].cpu())
-                aval_viewdir.append(viewdirs[app_mask].cpu())
-                aval_id.append(rays_id.unsqueeze(dim=-1).expand(-1, app_mask.shape[1])[app_mask.cpu()])
+                aval_pts.append(torch.concat((xyz_sampled[app_mask], viewdirs[app_mask]), dim=-1).cpu())
+                _, ind = app_alpha.max(dim=-1)
+                chunk_mask = app_mask.any(dim=-1)
+                ind = ind[chunk_mask]
+                chunk_rep, = chunk_mask.nonzero(as_tuple=True)
+                aval_rep.append(torch.concat((xyz_sampled[chunk_rep, ind], viewdirs[chunk_rep, ind]), dim=-1).cpu())
+            aval_id.append(app_mask.count_nonzero(dim=-1).cpu())
 
         del rays
         aval_pts = torch.concat(aval_pts, dim=0)
-        aval_viewdir = torch.concat(aval_viewdir, dim=0)
         aval_id = torch.concat(aval_id, dim=0)
+        ind, = torch.nonzero(aval_id, as_tuple=True)
+        aval_id = torch.stack((ind, aval_id[ind]), dim=-1)
+        aval_rep = torch.concat(aval_rep, dim=0)
 
-        return aval_pts, aval_viewdir, aval_id
+        return aval_pts, aval_id, aval_rep
 
     @torch.no_grad()
     def generate_grad(self, pts):
-        dx = torch.tensor((self.tensorf.stepSize, 0., 0.), device=self.device)
-        dy = torch.tensor((0., self.tensorf.stepSize, 0.), device=self.device)
-        dz = torch.tensor((0., 0., self.tensorf.stepSize), device=self.device)
-        pts_diff = torch.stack((pts + dx, pts + dy, pts + dz, pts - dx, pts - dy, pts - dz), dim=1)
-        all_query_pts = torch.concat((pts.unsqueeze(dim=1), pts_diff), dim=1).view(-1, 3)
+        ptsPath = Path(self.args.basedir, self.args.expname, 'cache')
+        ptsPath.mkdir(exist_ok=True)
 
-        ptsPath = Path(self.args.basedir, self.args.expname, 'aval_pts.npy')
+        ptsPath = ptsPath / 'all_query_pts.npy'
+        if ptsPath.exists():
+            all_query_pts = torch.from_numpy(open_memmap(ptsPath, mode='r')).to(self.device)
+            assert torch.allclose(pts, all_query_pts.view(-1, 7, 3)[:, 0])
+        else:
+            dx = torch.tensor((self.tensorf.stepSize, 0., 0.), device=self.device)
+            dy = torch.tensor((0., self.tensorf.stepSize, 0.), device=self.device)
+            dz = torch.tensor((0., 0., self.tensorf.stepSize), device=self.device)
+            pts_diff = torch.stack((pts + dx, pts + dy, pts + dz, pts - dx, pts - dy, pts - dz), dim=1)
+            all_query_pts = torch.concat((pts.unsqueeze(dim=1), pts_diff), dim=1).view(-1, 3)
+            np.save(ptsPath, all_query_pts.cpu().numpy())
+
+        ptsPath = ptsPath.with_stem('aval_pts')
         if ptsPath.exists():
             aval_pts = torch.from_numpy(open_memmap(ptsPath, mode='r'))
-            aval_viewdir = torch.from_numpy(open_memmap(ptsPath.with_stem('aval_viewdir'), mode='r'))
             aval_id = torch.from_numpy(open_memmap(ptsPath.with_stem('aval_id'), mode='r'))
+            aval_rep = torch.from_numpy(open_memmap(ptsPath.with_stem('aval_rep'), mode='r'))
         else:
-            aval_pts, aval_viewdir, aval_id = self.sample_filter_dataset()
+            aval_pts, aval_id, aval_rep = self.sample_filter_dataset()
             np.save(ptsPath, aval_pts.numpy())
-            np.save(ptsPath.with_stem('aval_viewdir'), aval_viewdir.numpy())
             np.save(ptsPath.with_stem('aval_id'), aval_id.numpy())
+            np.save(ptsPath.with_stem('aval_rep'), aval_rep.numpy())
+
+        ptsPath = ptsPath.with_stem('ball_ret_dists.7')
+        if ptsPath.exists():
+            ball_dists = rearrange(from_numpy(open_memmap(ptsPath, mode='r')), '1 (n d) k -> n d k', n=pts.shape[0])
+            ball_idx = from_numpy(open_memmap(ptsPath.with_stem('ball_ret_idx.7'), mode='r')).view(*ball_dists.shape)
+            ball_knn = from_numpy(open_memmap(ptsPath.with_stem('ball_ret_knn.7'), mode='r')).view(*ball_dists.shape, 3)
+        else:
+            aval_rep_pts = aval_rep[None, ..., :3].cuda()
+            knn_ret = knn_points(pts[None].cuda(), aval_rep_pts, K=1, return_sorted=False)
+            median_dist = torch.sqrt(knn_ret.dists).median().item()
+            print(knn_ret.dists.min().item(), knn_ret.dists.max().item(), median_dist)
+            median_dist = max(median_dist, self.tensorf.stepSize) * 2
+            ball_ret = ball_query(all_query_pts[None].cuda(), aval_rep_pts, K=40, radius=median_dist)
+            np.save(ptsPath.with_stem('ball_ret_dists.7'), ball_ret.dists.cpu().numpy())
+            np.save(ptsPath.with_stem('ball_ret_idx.7'), ball_ret.idx.cpu().numpy())
+            np.save(ptsPath.with_stem('ball_ret_knn.7'), ball_ret.knn.cpu().numpy())
+
+        ptsPath = ptsPath.with_stem('knn_ret_dists')
+        if ptsPath.exists():
+            knn_dists = torch.from_numpy(open_memmap(ptsPath, mode='r')).squeeze(0)
+            knn_idx = torch.from_numpy(open_memmap(ptsPath.with_stem('knn_ret_idx'), mode='r')).squeeze(0)
+        else:
+            knn_ret = knn_points(pts[None].cuda(), aval_rep[None, ..., :3].cuda(), K=100, return_sorted=True)
+            np.save(ptsPath, knn_ret.dists.cpu().numpy())
+            np.save(ptsPath.with_stem('knn_ret_idx'), knn_ret.idx.cpu().numpy())
+
+        pts_mask = (ball_idx[:, 0] < 0).all(dim=-1)
 
         return pts_diff
 
