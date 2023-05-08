@@ -18,6 +18,7 @@ class Merger(Evaluator):
     def __init__(self, args):
         self.args = args
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.target = self.build_network(self.args.ckpt)
 
         # init dataset
         dataset = dataset_dict[args.dataset_name]
@@ -26,6 +27,7 @@ class Merger(Evaluator):
         test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_test, is_stack=True,
                                semantic_type=args.semantic_type, pca=getattr(train_dataset, 'pca', None))
         super().__init__(self.build_network(), args, test_dataset, train_dataset)
+        self.tensorf.args = self.args
 
     def build_network(self, ckpt=None):
         args = self.args
@@ -72,6 +74,18 @@ class Merger(Evaluator):
         pc.export(savePath)
         return pts
 
+    def filter_pts(self, xyz_sampled, dists, ray_valid):
+        app_mask = torch.zeros_like(ray_valid)
+        app_alpha = torch.zeros_like(ray_valid, dtype=torch.float32)
+        if ray_valid.any():
+            sigma_feature = self.tensorf.compute_densityfeature(
+                self.tensorf.normalize_coord(xyz_sampled)[ray_valid])
+            validsigma = self.tensorf.feature2density(sigma_feature)
+            alpha = 1. - torch.exp(-validsigma * dists[ray_valid])
+            app_mask.masked_scatter_(ray_valid, alpha > 20 * self.tensorf.rayMarch_weight_thres)
+            app_alpha.masked_scatter_(ray_valid, alpha)
+        return app_mask, app_alpha
+
     @torch.no_grad()
     def sample_filter_dataset(self, chunk=64 * 1024):
         rays = torch.concat((self.alt_dataset.all_rays.view(-1, 6), self.test_dataset.all_rays.view(-1, 6)), dim=0)
@@ -83,15 +97,7 @@ class Merger(Evaluator):
             rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk].to(self.device)
             xyz_sampled, z_vals, dists, viewdirs, ray_valid = self.tensorf.sample_and_filter_rays(
                 rays_chunk, is_train=False, ndc_ray=self.args.ndc_ray, N_samples=512)
-            app_mask = torch.zeros_like(ray_valid)
-            app_alpha = torch.zeros_like(ray_valid, dtype=torch.float32)
-            if ray_valid.any():
-                sigma_feature = self.tensorf.compute_densityfeature(
-                    self.tensorf.normalize_coord(xyz_sampled)[ray_valid])
-                validsigma = self.tensorf.feature2density(sigma_feature)
-                alpha = 1. - torch.exp(-validsigma * dists[ray_valid])
-                app_mask.masked_scatter_(ray_valid, alpha > 20 * self.tensorf.rayMarch_weight_thres)
-                app_alpha.masked_scatter_(ray_valid, alpha)
+            app_mask, app_alpha = self.filter_pts(xyz_sampled, dists, ray_valid)
             if app_mask.any():
                 aval_pts.append(torch.concat((xyz_sampled[app_mask], viewdirs[app_mask]), dim=-1).cpu())
                 _, ind = app_alpha.max(dim=-1)
@@ -167,20 +173,41 @@ class Merger(Evaluator):
             np.save(ptsPath.with_stem('knn_ret_idx'), knn_ret.idx.cpu().numpy())
             knn_dists, knn_idx, _ = knn_ret
 
+        mask = self.tensorf.compute_validmask(all_query_pts)
+        dists = torch.full_like(mask, self.tensorf.stepSize, dtype=torch.float32)
+        mask, _ = self.filter_pts(all_query_pts, dists, mask)
+        mask = rearrange(mask, '(n d) -> n d', n=pts.shape[0]).cpu()
         all_query_pts = rearrange(all_query_pts, '(n d) c -> n d c', n=pts.shape[0]).cpu()
         pts_viewdir = aval_rep[knn_idx[:, 0], None, 3:].cpu().expand(-1, all_query_pts.shape[1], -1)
         all_query_pts = torch.cat((all_query_pts, pts_viewdir), dim=-1)
-        return all_query_pts
+        return all_query_pts, mask, dists
+
+    def poisson_editing(self, pts, mask, dists):
+        viewdirs = pts[..., 3:].view(-1, 3).to(self.device)
+        pts = pts[..., :3].view(-1, 3).to(self.device)
+        mask = mask.view(-1).to(self.device)
+        sigma = torch.zeros(mask.shape, device=self.device)
+        rgb = torch.zeros((*mask.shape, 3), device=self.device)
+
+        xyz_sampled = self.tensorf.normalize_coord(pts)
+
+        sigma_feature = self.tensorf.compute_densityfeature(xyz_sampled[mask])
+
+        validsigma = self.tensorf.feature2density(sigma_feature)
+        sigma.masked_scatter_(mask, validsigma)
+        rgb[mask] = self.tensorf.compute_radiance(xyz_sampled[mask], viewdirs[mask])
+
+        return rgb
 
     @torch.no_grad()
     def merge(self):
-        self.tensorf.args = self.args
-        self.tensorf.add_merge_target(target := self.build_network(self.args.ckpt))
+        self.tensorf.add_merge_target(self.target)
         if self.args.export_mesh:
-            self.export_mesh(target)
+            self.export_mesh(self.target)
             self.export_mesh()
         pts = self.export_pointcloud()
-        all_query_pts = self.generate_grad(pts)
+        pts, mask, dists = self.generate_grad(pts)
+        self.poisson_editing(pts, mask, dists)
         self.render_test()
 
 
