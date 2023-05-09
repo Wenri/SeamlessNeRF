@@ -1,4 +1,6 @@
 import os
+from contextlib import nullcontext
+from itertools import repeat, chain
 from pathlib import Path
 
 import numpy as np
@@ -8,6 +10,7 @@ from numpy.lib.format import open_memmap
 from pytorch3d.ops import knn_points, ball_query
 from torch import from_numpy
 from torch.utils.data import TensorDataset, DataLoader
+from tqdm import tqdm
 from trimesh import PointCloud
 
 from dataLoader import dataset_dict
@@ -30,6 +33,7 @@ class Merger(Evaluator):
                                semantic_type=args.semantic_type, pca=getattr(train_dataset, 'pca', None))
         super().__init__(self.build_network(), args, test_dataset, train_dataset)
         self.tensorf.args = self.args
+        self.optimizer = None
 
     def build_network(self, ckpt=None):
         args = self.args
@@ -176,58 +180,75 @@ class Merger(Evaluator):
             np.save(ptsPath.with_stem('knn_ret_idx'), knn_ret.idx.cpu().numpy())
             knn_dists, knn_idx, _ = knn_ret
 
-        mask = self.tensorf.compute_validmask(all_query_pts)
+        mask = self.tensorf.compute_validmask(all_query_pts, bitmap=True)
         dists = torch.full_like(mask, self.tensorf.stepSize, dtype=torch.float32)
-        mask, _ = self.filter_pts(all_query_pts, dists, mask)
+        app_mask, _ = self.filter_pts(all_query_pts, dists, mask.bool())
+        mask[~app_mask] = 0
         mask = rearrange(mask, '(n d) -> n d', n=pts.shape[0]).cpu()
         all_query_pts = rearrange(all_query_pts, '(n d) c -> n d c', n=pts.shape[0]).cpu()
         pts_viewdir = aval_rep[knn_idx[:, 0], None, 3:].cpu().expand(-1, all_query_pts.shape[1], -1)
         all_query_pts = torch.cat((all_query_pts, pts_viewdir), dim=-1)
         return all_query_pts, mask, dists.view(*mask.shape).cpu()
 
-    def compute_diff_loss(self, sigma_feature: DensityFeature, rgb):
+    def compute_diff_loss(self, sigma_feature: DensityFeature, rgb, bit_mask):
         pts = sigma_feature.pts
         mask = pts.valid_mask
         orig_rgb = torch.zeros((*mask.shape, 3), device=self.device)
         orig_rgb[mask] = torch.sigmoid(self.target.renderModule.orig_rgb)
         diff = rgb[:, 0:1, :] - rgb[:, 1:, :]
-        diff_gt = orig_rgb[:, 0:1, :] - orig_rgb[:, 1:, :]
+        diff_ogt = orig_rgb[:, 0:1, :] - orig_rgb[:, 1:, :]
 
         valid = torch.zeros_like(mask)
         valid.masked_scatter_(mask, torch.logical_not(pts.get_index()))
         valid = torch.logical_and(valid[:, 0:1], valid[:, 1:])
-        loss_diff = torch.nn.functional.mse_loss(diff[valid], diff_gt[valid], reduction='none')
+        loss_diff = torch.nn.functional.l1_loss(diff[valid], diff_ogt[valid], reduction='none')
 
         valid = torch.zeros_like(mask)
         valid.masked_scatter_(mask, pts.get_index() > 0)
-        valid = valid[:, 0]
-        loss_pin = torch.nn.functional.mse_loss(rgb[valid, 0], orig_rgb[valid, 0], reduction='none')
+        valid = torch.logical_and(valid[:, 0], torch.bitwise_and(bit_mask[:, 0], 1))
 
-        return torch.concat((loss_diff, loss_pin), dim=0).mean()
+        orig_rgb = torch.zeros_like(orig_rgb)
+        orig_rgb[mask] = self.tensorf.tgt_rgb
+        loss_pin = torch.nn.functional.l1_loss(orig_rgb[valid, 0], rgb[valid, 0], reduction='none')
+
+        return loss_diff.mean(), loss_pin.mean()
+
+    def train_one_batch(self, bit_mask, cur_pts):
+        bit_mask = bit_mask.to(self.device)
+        cur_mask = bit_mask.bool()
+        sigma = torch.zeros(cur_mask.shape, device=self.device)
+        rgb = torch.zeros((*cur_mask.shape, 3), device=self.device)
+
+        with nullcontext():  # torch.no_grad():
+            cur_dirs = cur_pts[..., 3:].to(self.device)
+            cur_pts = cur_pts[..., :3].to(self.device)
+            xyz_sampled = self.tensorf.normalize_coord(cur_pts)
+            sigma_feature = self.tensorf.compute_densityfeature(xyz_sampled[cur_mask])
+            validsigma = self.tensorf.feature2density(sigma_feature)
+            sigma.masked_scatter_(cur_mask, validsigma)
+
+        rgb[cur_mask] = self.tensorf.compute_radiance(xyz_sampled[cur_mask], cur_dirs[cur_mask])
+        loss_diff, loss_pin = self.compute_diff_loss(sigma_feature, rgb, bit_mask)
+        loss_total = loss_diff + loss_pin
+        self.optimizer.zero_grad()
+        loss_total.backward()
+        self.optimizer.step()
+        return loss_diff.item(), loss_pin.item()
 
     def poisson_editing(self, pts, mask, dists, batch_size=65536):
         dataset = TensorDataset(pts, mask, dists)
         data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=True)
-        loss = 0
+        pbar = tqdm(chain.from_iterable(repeat(data_loader)))
+        loss = None
 
-        for cur_pts, cur_mask, cur_dist in data_loader:
-            cur_dirs = cur_pts[..., 3:].to(self.device)
-            cur_pts = cur_pts[..., :3].to(self.device)
-            cur_mask = cur_mask.to(self.device)
+        grad_vars = self.target.renderModule.mlp_control.parameters()
+        self.optimizer = torch.optim.Adam(grad_vars, lr=0.01, betas=(0.9, 0.99))
 
-            sigma = torch.zeros(cur_mask.shape, device=self.device)
-            rgb = torch.zeros((*cur_mask.shape, 3), device=self.device)
+        for cur_pts, cur_mask, cur_dist in pbar:
+            loss_diff, loss_pin = self.train_one_batch(cur_mask, cur_pts)
+            pbar.set_description(f'loss_diff: {loss_diff:.4f}, loss_pin: {loss_pin:.4f}')
 
-            xyz_sampled = self.tensorf.normalize_coord(cur_pts)
-
-            sigma_feature = self.tensorf.compute_densityfeature(xyz_sampled[cur_mask])
-
-            validsigma = self.tensorf.feature2density(sigma_feature)
-            sigma.masked_scatter_(cur_mask, validsigma)
-            rgb[cur_mask] = self.tensorf.compute_radiance(xyz_sampled[cur_mask], cur_dirs[cur_mask])
-            loss = self.compute_diff_loss(sigma_feature, rgb)
-
-        return rgb
+        return loss
 
     def merge(self):
         if self.args.export_mesh:

@@ -91,6 +91,7 @@ class ColorVMSplit(TensorVMSplit):
     def __init__(self, *args, **kwargs):
         self.merge_target = []
         self.args = None
+        self.tgt_rgb = None
         super().__init__(*args, **kwargs)
 
     def init_render_func(self, shadingMode, pos_pe=6, view_pe=6, fea_pe=6, featureC=128, *args, **kwargs):
@@ -120,13 +121,15 @@ class ColorVMSplit(TensorVMSplit):
         xyz_sampled = shift_and_scale(xyz_sampled)
         return func(xyz_sampled)
 
-    def compute_validmask(self, xyz_sampled: torch.Tensor):
-        ray_valid = super().compute_validmask(xyz_sampled)
+    def compute_validmask(self, xyz_sampled: torch.Tensor, bitmap=False):
+        ray_valid = super().compute_validmask(xyz_sampled).int()
         shift_and_scale = getattr(self.alphaMask, 'shift_and_scale', torch.nn.Identity())
         for model in self.merge_target:
-            ray_valid |= model.compute_validmask(shift_and_scale(xyz_sampled))
+            tgt_mask = model.compute_validmask(shift_and_scale(xyz_sampled))
+            ray_valid = torch.bitwise_left_shift(ray_valid, 1)
+            ray_valid = torch.bitwise_or(ray_valid, tgt_mask.int())
             # ray_valid |= torch.ones_like(ray_valid, dtype=torch.bool, device=ray_valid.device)
-        return ray_valid
+        return ray_valid if bitmap else ray_valid.bool()
 
     def compute_densityfeature(self, xyz_sampled: NormalizeCoord | NormalizeCoordMasked):
         gen = (model.compute_densityfeature(xyz_sampled.adj_coord(
@@ -151,7 +154,7 @@ class ColorVMSplit(TensorVMSplit):
             self.adjust_coord, func=model.normalize_coord)).get_array(), viewdirs) for model in self.merge_target]
         idx = pts.get_index()
         rgb = torch.where((idx > 0.5).unsqueeze(-1), rgb, tgt)
-        # rgb = tgt
+        self.tgt_rgb = tgt
         return rgb
 
     def forward(self, *params, args=None, **kwargs):
@@ -171,7 +174,7 @@ class PoissonMLPRender(MLPRender_Fea):
             rgb = super().forward(pts, viewdirs, features)
         return rgb
 
-    def mlp_forward_hook(self, mlp, data_in, output):
+    def mlp_forward_hook(self, mlp, data_in, output: torch.Tensor):
         self.orig_rgb = output
         return output + self.mlp_control(*data_in)
 
