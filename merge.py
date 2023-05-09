@@ -7,10 +7,12 @@ from einops import rearrange
 from numpy.lib.format import open_memmap
 from pytorch3d.ops import knn_points, ball_query
 from torch import from_numpy
+from torch.utils.data import TensorDataset, DataLoader
 from trimesh import PointCloud
 
 from dataLoader import dataset_dict
 from eval import Evaluator
+from models.colorRF import DensityFeature
 from utils import convert_sdf_samples_to_ply
 
 
@@ -74,6 +76,7 @@ class Merger(Evaluator):
         pc.export(savePath)
         return pts
 
+    @torch.no_grad()
     def filter_pts(self, xyz_sampled, dists, ray_valid):
         app_mask = torch.zeros_like(ray_valid)
         app_alpha = torch.zeros_like(ray_valid, dtype=torch.float32)
@@ -180,27 +183,54 @@ class Merger(Evaluator):
         all_query_pts = rearrange(all_query_pts, '(n d) c -> n d c', n=pts.shape[0]).cpu()
         pts_viewdir = aval_rep[knn_idx[:, 0], None, 3:].cpu().expand(-1, all_query_pts.shape[1], -1)
         all_query_pts = torch.cat((all_query_pts, pts_viewdir), dim=-1)
-        return all_query_pts, mask, dists
+        return all_query_pts, mask, dists.view(*mask.shape).cpu()
 
-    def poisson_editing(self, pts, mask, dists):
-        viewdirs = pts[..., 3:].view(-1, 3).to(self.device)
-        pts = pts[..., :3].view(-1, 3).to(self.device)
-        mask = mask.view(-1).to(self.device)
-        sigma = torch.zeros(mask.shape, device=self.device)
-        rgb = torch.zeros((*mask.shape, 3), device=self.device)
+    def compute_diff_loss(self, sigma_feature: DensityFeature, rgb):
+        pts = sigma_feature.pts
+        mask = pts.valid_mask
+        orig_rgb = torch.zeros((*mask.shape, 3), device=self.device)
+        orig_rgb[mask] = torch.sigmoid(self.target.renderModule.orig_rgb)
+        diff = rgb[:, 0:1, :] - rgb[:, 1:, :]
+        diff_gt = orig_rgb[:, 0:1, :] - orig_rgb[:, 1:, :]
 
-        xyz_sampled = self.tensorf.normalize_coord(pts)
+        valid = torch.zeros_like(mask)
+        valid.masked_scatter_(mask, torch.logical_not(pts.get_index()))
+        valid = torch.logical_and(valid[:, 0:1], valid[:, 1:])
+        loss_diff = torch.nn.functional.mse_loss(diff[valid], diff_gt[valid], reduction='none')
 
-        sigma_feature = self.tensorf.compute_densityfeature(xyz_sampled[mask])
+        valid = torch.zeros_like(mask)
+        valid.masked_scatter_(mask, pts.get_index() > 0)
+        valid = valid[:, 0]
+        loss_pin = torch.nn.functional.mse_loss(rgb[valid, 0], orig_rgb[valid, 0], reduction='none')
 
-        validsigma = self.tensorf.feature2density(sigma_feature)
-        sigma.masked_scatter_(mask, validsigma)
-        rgb[mask] = self.tensorf.compute_radiance(xyz_sampled[mask], viewdirs[mask])
+        return torch.concat((loss_diff, loss_pin), dim=0).mean()
+
+    def poisson_editing(self, pts, mask, dists, batch_size=65536):
+        dataset = TensorDataset(pts, mask, dists)
+        data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=True)
+        loss = 0
+
+        for cur_pts, cur_mask, cur_dist in data_loader:
+            cur_dirs = cur_pts[..., 3:].to(self.device)
+            cur_pts = cur_pts[..., :3].to(self.device)
+            cur_mask = cur_mask.to(self.device)
+
+            sigma = torch.zeros(cur_mask.shape, device=self.device)
+            rgb = torch.zeros((*cur_mask.shape, 3), device=self.device)
+
+            xyz_sampled = self.tensorf.normalize_coord(cur_pts)
+
+            sigma_feature = self.tensorf.compute_densityfeature(xyz_sampled[cur_mask])
+
+            validsigma = self.tensorf.feature2density(sigma_feature)
+            sigma.masked_scatter_(cur_mask, validsigma)
+            rgb[cur_mask] = self.tensorf.compute_radiance(xyz_sampled[cur_mask], cur_dirs[cur_mask])
+            loss = self.compute_diff_loss(sigma_feature, rgb)
 
         return rgb
 
-    @torch.no_grad()
     def merge(self):
+        self.target.renderModule.enable_trainable_control()
         self.tensorf.add_merge_target(self.target)
         if self.args.export_mesh:
             self.export_mesh(self.target)

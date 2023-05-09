@@ -1,8 +1,11 @@
+import io
 from collections import UserList
+from contextlib import nullcontext
 from functools import partial
 from itertools import zip_longest
 
 import torch
+from torch import nn
 
 from .renderBase import MLPRender_Fea
 from .tensoRF import TensorVMSplit
@@ -162,7 +165,26 @@ class ColorVMSplit(TensorVMSplit):
 class PoissonMLPRender(MLPRender_Fea):
     def __init__(self, inChanel, viewpe=6, feape=6, featureC=128, **kwargs):
         super().__init__(inChanel, viewpe, feape, featureC)
+        self.orig_rgb = None
 
-    def forward(self, pts, viewdirs, features):
-        rgb = super().forward(pts, viewdirs, features)
+    def forward(self, pts, viewdirs, features, ignore_control=False):
+        add_control = hasattr(self, 'mlp_control') and not ignore_control
+        with self.mlp.register_forward_hook(self.mlp_forward_hook) if add_control else nullcontext():
+            rgb = super().forward(pts, viewdirs, features)
         return rgb
+
+    def mlp_forward_hook(self, mlp, data_in, output):
+        self.orig_rgb = output
+        return output + self.mlp_control(*data_in)
+
+    def enable_trainable_control(self):
+        buffer = io.BytesIO()  # read from buffer
+        torch.save(self.mlp, buffer)
+        buffer.seek(0)  # <--- must see to origin every time before reading
+        new_mlp = torch.load(buffer)
+        zero_conv = nn.Linear(3, 3)
+        torch.nn.init.constant_(zero_conv.bias, 0)
+        torch.nn.init.constant_(zero_conv.weight, 0)
+        new_mlp.append(zero_conv)
+        new_mlp.cuda()
+        self.add_module('mlp_control', new_mlp)
