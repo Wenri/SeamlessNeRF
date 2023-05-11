@@ -5,12 +5,10 @@ basedir = ./log
 ckpt = ./ref/tensorf_Toad_VM_colorVMSplit/tensorf_Toad_VM.th
 N_vis = 5
 
-tgt_rot = [0, 0, 0]
-tgt_trans = [0, 0, 0]
-tgt_scale = 0.6
+matrix = [0.7702, 0.0000, 0.0000, 0.1255, 0.0000, 0.7702, 0.0000, -0.0732, 0.0000, 0.0000, 0.7702, -0.1245, 0.0000, 0.0000, 0.0000, 1.0000]
 
 render_only = 1
-# export_mesh = 1
+export_mesh = 1
 render_test = 1
 
 model_name = ColorVMSplit

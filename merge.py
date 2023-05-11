@@ -48,32 +48,32 @@ class Merger(Evaluator):
         return tensorf
 
     @torch.no_grad()
-    def export_mesh(self, tensorf=None):
+    def export_mesh(self, tensorf=None, prefix=None):
         args = self.args
-        savePath = Path(args.basedir, args.expname)
         if tensorf is None:
             tensorf = self.tensorf
-            savePath = savePath / args.expname
-        else:
-            savePath = savePath / os.path.basename(args.ckpt)
-        savePath = savePath.with_suffix('.ply')
+            if not prefix:
+                prefix = args.expname
+        elif not prefix:
+            prefix = os.path.basename(args.ckpt)
+        save_path = Path(args.basedir, args.expname, prefix).with_suffix('.ply')
         alpha, _ = tensorf.getDenseAlpha()
-        convert_sdf_samples_to_ply(alpha.cpu(), savePath, bbox=tensorf.aabb.cpu(), level=0.005)
+        convert_sdf_samples_to_ply(alpha.cpu(), save_path, bbox=tensorf.aabb.cpu(), level=0.005)
 
     @torch.no_grad()
     def export_pointcloud(self, tensorf=None):
         args = self.args
-        savePath = Path(args.basedir, args.expname)
+        save_path = Path(args.basedir, args.expname)
         if tensorf is None:
             tensorf = self.tensorf
-            savePath = savePath / args.expname
+            save_path = save_path / args.expname
         else:
-            savePath = savePath / os.path.basename(args.ckpt)
-        savePath = savePath.with_stem(savePath.stem + '_pc').with_suffix('.ply')
+            save_path = save_path / os.path.basename(args.ckpt)
+        save_path = save_path.with_stem(save_path.stem + '_pc').with_suffix('.ply')
         alpha, xyz = tensorf.getDenseAlpha()
         pts = xyz[alpha > 0.005]
         pc = PointCloud(pts.cpu().numpy())
-        pc.export(savePath)
+        pc.export(save_path)
         return pts
 
     @torch.no_grad()
@@ -230,6 +230,8 @@ class Merger(Evaluator):
         return rgb
 
     def merge(self):
+        if self.args.export_mesh:
+            self.export_mesh(prefix=os.path.basename(self.args.datadir))
         self.target.renderModule.enable_trainable_control()
         self.tensorf.add_merge_target(self.target)
         if self.args.export_mesh:
@@ -251,9 +253,7 @@ def config_parser(parser):
     parser.add_argument("--datadir", type=str, default='./data/llff/fern', help='input data directory')
 
     parser.add_argument('--downsample_test', type=float, default=1.0)
-    parser.add_argument('--tgt_rot', type=float, nargs='+', default=[0., 0., 0.])
-    parser.add_argument('--tgt_trans', type=float, nargs='+', default=[0., 0., 0.])
-    parser.add_argument('--tgt_scale', type=float, default=1.0)
+    parser.add_argument('--matrix', type=float, nargs='+', default=())
 
     parser.add_argument('--model_name', type=MODEL_ZOO.get, default='TensorVMSplit', choices=MODEL_ZOO)
     parser.add_argument('--dataset_name', type=str, default='blender', choices=dataset_dict.keys())

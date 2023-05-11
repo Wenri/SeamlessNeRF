@@ -69,9 +69,9 @@ class DensityFeature(UserList):
 
 
 class MultipleGridMask(torch.nn.ModuleList):
-    def __init__(self, args, *masks: AlphaGridMask):
+    def __init__(self, matrix, *masks: AlphaGridMask):
         super().__init__(masks)
-        self.args = args
+        self.matrix = torch.as_tensor(matrix).view(4, 4)
 
     def sample_alpha(self, xyz_sampled):
         alpha_vals = [m.sample_alpha(f(xyz_sampled)) for m, f in
@@ -80,13 +80,11 @@ class MultipleGridMask(torch.nn.ModuleList):
         return alpha_vals
 
     def shift_and_scale(self, xyz_sampled):
-        from scipy.spatial.transform import Rotation as R
-        r = R.from_euler('zyx', self.args.tgt_rot, degrees=True)
-        r = torch.as_tensor(r.as_matrix(), dtype=xyz_sampled.dtype, device=xyz_sampled.device)
-        xyz_sampled = xyz_sampled - torch.tensor(self.args.tgt_trans, dtype=xyz_sampled.dtype,
-                                                 device=xyz_sampled.device)
-        xyz_sampled = xyz_sampled / self.args.tgt_scale
-        return xyz_sampled @ r
+        ones = torch.ones(xyz_sampled.shape[:-1], dtype=xyz_sampled.dtype, device=xyz_sampled.device)
+        xyz_sampled = torch.cat((xyz_sampled, ones.unsqueeze(-1)), dim=-1)
+        t_matrix = self.matrix.T.to(dtype=xyz_sampled.dtype, device=xyz_sampled.device)
+        xyz_sampled = torch.linalg.solve(t_matrix, xyz_sampled, left=False)
+        return xyz_sampled[..., :3]
 
 
 class ColorVMSplit(TensorVMSplit):
@@ -100,9 +98,9 @@ class ColorVMSplit(TensorVMSplit):
 
     def add_merge_target(self, model):
         if isinstance(self.alphaMask, AlphaGridMask):
-            self.alphaMask = MultipleGridMask(self.args, self.alphaMask)
+            self.alphaMask = MultipleGridMask(self.args.matrix, self.alphaMask)
         elif self.alphaMask is None:
-            self.alphaMask = MultipleGridMask(self.args)
+            self.alphaMask = MultipleGridMask(self.args.matrix)
 
         if isinstance(model.alphaMask, type(self.alphaMask)):
             self.alphaMask.extend(model.alphaMask)
