@@ -1,6 +1,6 @@
 import os
 from contextlib import nullcontext
-from itertools import repeat, chain
+from itertools import repeat, chain, count
 from pathlib import Path
 
 import numpy as np
@@ -124,11 +124,7 @@ class Merger(Evaluator):
         return aval_pts, aval_id, aval_rep
 
     @torch.no_grad()
-    def generate_grad(self, pts):
-        ptsPath = Path(self.args.basedir, self.args.expname, 'cache')
-        ptsPath.mkdir(exist_ok=True)
-
-        ptsPath = ptsPath / 'all_query_pts.npy'
+    def load_all_query_pts(self, ptsPath: Path, pts):
         if ptsPath.exists():
             all_query_pts = torch.from_numpy(open_memmap(ptsPath, mode='r')).to(self.device)
             assert torch.allclose(pts, all_query_pts.view(-1, 7, 3)[:, 0])
@@ -139,7 +135,10 @@ class Merger(Evaluator):
             pts_diff = torch.stack((pts + dx, pts + dy, pts + dz, pts - dx, pts - dy, pts - dz), dim=1)
             all_query_pts = torch.concat((pts.unsqueeze(dim=1), pts_diff), dim=1).view(-1, 3)
             np.save(ptsPath, all_query_pts.cpu().numpy())
+        return all_query_pts
 
+    @torch.no_grad()
+    def load_aval_pts(self, ptsPath: Path):
         ptsPath = ptsPath.with_stem('aval_pts')
         if ptsPath.exists():
             aval_pts = torch.from_numpy(open_memmap(ptsPath, mode='r'))
@@ -151,6 +150,10 @@ class Merger(Evaluator):
             np.save(ptsPath.with_stem('aval_id'), aval_id.numpy())
             np.save(ptsPath.with_stem('aval_rep'), aval_rep.numpy())
 
+        return aval_pts, aval_id, aval_rep
+
+    @torch.no_grad()
+    def load_ball_pts(self, ptsPath: Path, pts, all_query_pts, aval_rep):
         ptsPath = ptsPath.with_stem('ball_ret_dists.2')
         if ptsPath.exists():
             ball_dists = rearrange(from_numpy(open_memmap(ptsPath, mode='r')), '1 (n d) k -> n d k', n=pts.shape[0])
@@ -162,7 +165,7 @@ class Merger(Evaluator):
             median_dist = torch.sqrt(knn_ret.dists).median().item()
             print(knn_ret.dists.min().item(), knn_ret.dists.max().item(), median_dist)
             median_dist = max(median_dist, self.tensorf.stepSize) * 2
-            ball_ret = ball_query(all_query_pts[None].cuda(), aval_rep_pts, K=40, radius=median_dist)
+            ball_ret = ball_query(all_query_pts[None].cuda(), aval_rep_pts, K=10, radius=median_dist)
             np.save(ptsPath.with_stem('ball_ret_dists.2'), ball_ret.dists.cpu().numpy())
             np.save(ptsPath.with_stem('ball_ret_idx.2'), ball_ret.idx.cpu().numpy())
             np.save(ptsPath.with_stem('ball_ret_knn.2'), ball_ret.knn.cpu().numpy())
@@ -170,6 +173,10 @@ class Merger(Evaluator):
             ball_idx = ball_ret.idx.view(*ball_dists.shape)
             ball_knn = ball_ret.knn.view(*ball_dists.shape, 3)
 
+        return ball_dists, ball_idx, ball_knn
+
+    @torch.no_grad()
+    def load_knn_pts(self, ptsPath: Path, pts, aval_rep):
         ptsPath = ptsPath.with_stem('knn_ret_dists')
         if ptsPath.exists():
             knn_dists = torch.from_numpy(open_memmap(ptsPath, mode='r')).squeeze(0)
@@ -179,6 +186,17 @@ class Merger(Evaluator):
             np.save(ptsPath, knn_ret.dists.cpu().numpy())
             np.save(ptsPath.with_stem('knn_ret_idx'), knn_ret.idx.cpu().numpy())
             knn_dists, knn_idx, _ = knn_ret
+        return knn_dists, knn_idx
+
+    @torch.no_grad()
+    def generate_grad(self, pts):
+        ptsPath = Path(self.args.basedir, self.args.expname, 'cache', 'all_query_pts.npy')
+        ptsPath.parent.mkdir(exist_ok=True)
+
+        all_query_pts = self.load_all_query_pts(ptsPath, pts)
+        aval_pts, aval_id, aval_rep = self.load_aval_pts(ptsPath)
+        # ball_dists, ball_idx, ball_knn = self.load_ball_pts(ptsPath, pts, all_query_pts, aval_rep)
+        knn_dists, knn_idx = self.load_knn_pts(ptsPath, pts, aval_rep)
 
         mask = self.tensorf.compute_validmask(all_query_pts, bitmap=True)
         dists = torch.full_like(mask, self.tensorf.stepSize, dtype=torch.float32)
@@ -236,17 +254,29 @@ class Merger(Evaluator):
         return loss_diff.item(), loss_pin.item()
 
     def poisson_editing(self, pts, mask, dists, batch_size=65536):
+        args = self.args
         dataset = TensorDataset(pts, mask, dists)
         data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=True)
+        save_path = Path(args.basedir, args.expname, 'imgs_test_iters')
         pbar = tqdm(chain.from_iterable(repeat(data_loader)))
         loss = None
 
         grad_vars = self.target.renderModule.mlp_control.parameters()
-        self.optimizer = torch.optim.Adam(grad_vars, lr=0.01, betas=(0.9, 0.99))
+        self.optimizer = torch.optim.Adam(grad_vars, lr=0.0001, betas=(0.9, 0.99))
+        save_path.mkdir(exist_ok=True)
+        (save_path / 'rgbd').mkdir(exist_ok=True)
 
+        batch_counter = count()
         for cur_pts, cur_mask, cur_dist in pbar:
             loss_diff, loss_pin = self.train_one_batch(cur_mask, cur_pts)
             pbar.set_description(f'loss_diff: {loss_diff:.4f}, loss_pin: {loss_pin:.4f}')
+
+            cur_idx = next(batch_counter)
+            total = self.test_dataset.all_rays.shape[0]
+            test_idx = cur_idx % total
+            with torch.no_grad():
+                self.eval_sample(test_idx, self.test_dataset.all_rays[test_idx], save_path, f'it{cur_idx:06d}_',
+                                 N_samples=-1, white_bg=self.test_dataset.white_bg, save_GT=False)
 
         return loss
 

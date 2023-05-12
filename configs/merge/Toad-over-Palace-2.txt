@@ -1,6 +1,6 @@
 dataset_name = nsvf
 datadir = data/gbcseldb/Palace
-expname = merge_Toad_over_Palace
+expname = merge_Toad_over_Palace_2
 basedir = ./log
 ckpt = ./ref/tensorf_Toad_VM_colorVMSplit/tensorf_Toad_VM.th
 N_vis = 5

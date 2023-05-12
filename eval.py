@@ -42,7 +42,8 @@ class Evaluator:
         self.ssims, self.l_alex, self.l_vgg = [], [], []
         self.logger = logging.getLogger(type(self).__name__)
 
-    def eval_sample(self, idx, samples, savePath: Path, prtx='', N_samples=-1, white_bg=False, ndc_ray=False):
+    def eval_sample(self, idx, samples, savePath: Path, prtx='', N_samples=-1, white_bg=False, ndc_ray=False,
+                    save_GT=True):
         test_dataset = self.test_dataset
         tensorf = self.tensorf
 
@@ -56,20 +57,22 @@ class Evaluator:
 
         if len(test_dataset.all_rgbs):
             gt_rgb = test_dataset.all_rgbs[idx].view(H, W, 3)
-            gt_vis.append(gt_rgb)
+            if save_GT:
+                gt_vis.append(gt_rgb)
             loss = torch.mean((rgb_map - gt_rgb) ** 2)
             self.PSNRs.append(-10.0 * np.log(loss.item()) / np.log(10.0))
             self.compute_metrics(gt_rgb, rgb_map)
 
-        if len(getattr(test_dataset, 'all_sems', ())):
+        if save_GT and len(getattr(test_dataset, 'all_sems', ())):
             c1, c2 = torch.ones(test_dataset.all_rgbs.shape[1:-1], dtype=torch.bool).nonzero(as_tuple=True)
             c0 = torch.full_like(c1, idx)
             coord = torch.stack((c0, c1, c2), dim=-1)
             gt_sem = test_dataset.sample_sems(coord).view(H, W, 3)
             gt_vis.append(gt_sem)
 
-        gt_vis = (torch.cat(gt_vis, dim=1).numpy() * 255).astype('uint8')
-        imageio.imwrite(savePath / f'{prtx}{idx:03d}_GT.png', gt_vis)
+        if gt_vis:
+            gt_vis = (torch.cat(gt_vis, dim=1).numpy() * 255).astype('uint8')
+            imageio.imwrite(savePath / f'{prtx}{idx:03d}_GT.png', gt_vis)
 
         for rgb, plt, name in zip(
                 torch.tensor_split(plt_map.cpu(), self.n_palette, dim=-1), self.palette, self.plt_names):

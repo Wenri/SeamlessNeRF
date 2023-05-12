@@ -71,7 +71,7 @@ class DensityFeature(UserList):
 class MultipleGridMask(torch.nn.ModuleList):
     def __init__(self, matrix, *masks: AlphaGridMask):
         super().__init__(masks)
-        self.matrix = torch.as_tensor(matrix).view(4, 4)
+        self.matrix = torch.linalg.inv(torch.as_tensor(matrix).view(4, 4))
 
     def sample_alpha(self, xyz_sampled):
         alpha_vals = [m.sample_alpha(f(xyz_sampled)) for m, f in
@@ -83,7 +83,8 @@ class MultipleGridMask(torch.nn.ModuleList):
         ones = torch.ones(xyz_sampled.shape[:-1], dtype=xyz_sampled.dtype, device=xyz_sampled.device)
         xyz_sampled = torch.cat((xyz_sampled, ones.unsqueeze(-1)), dim=-1)
         t_matrix = self.matrix.T.to(dtype=xyz_sampled.dtype, device=xyz_sampled.device)
-        xyz_sampled = torch.linalg.solve(t_matrix, xyz_sampled, left=False)
+        # xyz_sampled = torch.linalg.solve(t_matrix, xyz_sampled, left=False)
+        xyz_sampled = xyz_sampled @ t_matrix
         return xyz_sampled[..., :3]
 
 
