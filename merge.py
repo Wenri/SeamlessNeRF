@@ -1,5 +1,4 @@
 import os
-from contextlib import nullcontext
 from itertools import repeat, chain, count
 from pathlib import Path
 
@@ -10,7 +9,7 @@ from numpy.lib.format import open_memmap
 from pytorch3d.ops import knn_points, ball_query
 from torch import from_numpy
 from torch.utils.data import TensorDataset, DataLoader
-from tqdm import tqdm
+from tqdm import tqdm, trange
 from trimesh import PointCloud
 
 from dataLoader import dataset_dict
@@ -94,32 +93,36 @@ class Merger(Evaluator):
         return app_mask, app_alpha
 
     @torch.no_grad()
-    def sample_filter_dataset(self, chunk=64 * 1024):
+    def sample_filter_dataset(self, pts_path, chunk=64 * 1024):
         rays = torch.concat((self.alt_dataset.all_rays.view(-1, 6), self.test_dataset.all_rays.view(-1, 6)), dim=0)
         N_rays_all = rays.shape[0]
-        aval_pts = []
+        aval_cnt = count()
         aval_id = []
-        aval_rep = []
-        for chunk_idx in range(N_rays_all // chunk + int(N_rays_all % chunk > 0)):
+        for chunk_idx in trange(N_rays_all // chunk + int(N_rays_all % chunk > 0), desc='sample_filter_dataset'):
             rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk].to(self.device)
             xyz_sampled, z_vals, dists, viewdirs, ray_valid = self.tensorf.sample_and_filter_rays(
                 rays_chunk, is_train=False, ndc_ray=self.args.ndc_ray, N_samples=512)
             app_mask, app_alpha = self.filter_pts(xyz_sampled, dists, ray_valid)
             if app_mask.any():
-                aval_pts.append(torch.concat((xyz_sampled[app_mask], viewdirs[app_mask]), dim=-1).cpu())
+                np.save(pts_path.with_stem(f'aval_pts_tmp_{(cur_id := next(aval_cnt))}'),
+                        torch.concat((xyz_sampled[app_mask], viewdirs[app_mask]), dim=-1).cpu().numpy())
                 _, ind = app_alpha.max(dim=-1)
                 chunk_mask = app_mask.any(dim=-1)
                 ind = ind[chunk_mask]
                 chunk_rep, = chunk_mask.nonzero(as_tuple=True)
-                aval_rep.append(torch.concat((xyz_sampled[chunk_rep, ind], viewdirs[chunk_rep, ind]), dim=-1).cpu())
+                np.save(pts_path.with_stem(f'aval_rep_tmp_{cur_id}'),
+                        torch.concat((xyz_sampled[chunk_rep, ind], viewdirs[chunk_rep, ind]), dim=-1).cpu().numpy())
             aval_id.append(app_mask.count_nonzero(dim=-1).cpu())
 
         del rays
-        aval_pts = torch.concat(aval_pts, dim=0)
+        aval_cnt = next(aval_cnt)
         aval_id = torch.concat(aval_id, dim=0)
         ind, = torch.nonzero(aval_id, as_tuple=True)
         aval_id = torch.stack((ind, aval_id[ind]), dim=-1)
-        aval_rep = torch.concat(aval_rep, dim=0)
+        aval_pts = [open_memmap(pts_path.with_stem(f'aval_pts_tmp_{cur_id}'), mode='r') for cur_id in range(aval_cnt)]
+        aval_pts = np.concatenate(aval_pts, axis=0)
+        aval_rep = [open_memmap(pts_path.with_stem(f'aval_rep_tmp_{cur_id}'), mode='r') for cur_id in range(aval_cnt)]
+        aval_rep = np.concatenate(aval_rep, axis=0)
 
         return aval_pts, aval_id, aval_rep
 
@@ -145,7 +148,7 @@ class Merger(Evaluator):
             aval_id = torch.from_numpy(open_memmap(ptsPath.with_stem('aval_id'), mode='r'))
             aval_rep = torch.from_numpy(open_memmap(ptsPath.with_stem('aval_rep'), mode='r'))
         else:
-            aval_pts, aval_id, aval_rep = self.sample_filter_dataset()
+            aval_pts, aval_id, aval_rep = self.sample_filter_dataset(ptsPath)
             np.save(ptsPath, aval_pts.numpy())
             np.save(ptsPath.with_stem('aval_id'), aval_id.numpy())
             np.save(ptsPath.with_stem('aval_rep'), aval_rep.numpy())
@@ -229,7 +232,21 @@ class Merger(Evaluator):
         orig_rgb[mask] = self.tensorf.tgt_rgb
         loss_pin = torch.nn.functional.l1_loss(orig_rgb[valid, 0], rgb[valid, 0], reduction='none')
 
-        return loss_diff.mean(), loss_pin.mean()
+        loss = {'loss_diff': loss_diff.mean(), 'loss_pin': loss_pin.mean()}
+        return loss
+
+    def compute_diff_loss2(self, sigma_feature: DensityFeature, rgb, bit_mask):
+        pts = sigma_feature.pts
+        mask = pts.valid_mask
+        orig_rgb = torch.zeros((*mask.shape, 3), device=self.device)
+        orig_rgb[mask] = torch.sigmoid(self.target.renderModule.orig_rgb)
+        diff = rgb[:, 0:1, :] - rgb[:, 1:, :]
+        diff_ogt = orig_rgb[:, 0:1, :] - orig_rgb[:, 1:, :]
+
+        valid = torch.logical_and(torch.bitwise_and(bit_mask[:, 0:1], 1), mask[:, 1:])
+        loss = {'loss_diff': torch.nn.functional.mse_loss(diff[valid], diff_ogt[valid], reduction='mean')}
+
+        return loss
 
     def train_one_batch(self, bit_mask, cur_pts):
         bit_mask = bit_mask.to(self.device)
@@ -237,7 +254,7 @@ class Merger(Evaluator):
         sigma = torch.zeros(cur_mask.shape, device=self.device)
         rgb = torch.zeros((*cur_mask.shape, 3), device=self.device)
 
-        with nullcontext():  # torch.no_grad():
+        with torch.no_grad():
             cur_dirs = cur_pts[..., 3:].to(self.device)
             cur_pts = cur_pts[..., :3].to(self.device)
             xyz_sampled = self.tensorf.normalize_coord(cur_pts)
@@ -246,12 +263,12 @@ class Merger(Evaluator):
             sigma.masked_scatter_(cur_mask, validsigma)
 
         rgb[cur_mask] = self.tensorf.compute_radiance(xyz_sampled[cur_mask], cur_dirs[cur_mask])
-        loss_diff, loss_pin = self.compute_diff_loss(sigma_feature, rgb, bit_mask)
-        loss_total = loss_diff + loss_pin
+        loss_dict = self.compute_diff_loss(sigma_feature, rgb, bit_mask)
+        loss_total = sum(loss_dict.values())
         self.optimizer.zero_grad()
         loss_total.backward()
         self.optimizer.step()
-        return loss_diff.item(), loss_pin.item()
+        return {k: v.item() for k, v in loss_dict.items()}
 
     def poisson_editing(self, pts, mask, dists, batch_size=65536):
         args = self.args
@@ -268,8 +285,8 @@ class Merger(Evaluator):
 
         batch_counter = count()
         for cur_pts, cur_mask, cur_dist in pbar:
-            loss_diff, loss_pin = self.train_one_batch(cur_mask, cur_pts)
-            pbar.set_description(f'loss_diff: {loss_diff:.4f}, loss_pin: {loss_pin:.4f}')
+            loss_dict = self.train_one_batch(cur_mask, cur_pts)
+            pbar.set_description(', '.join(f'{k}: {v:.4f}' for k, v in loss_dict))
 
             cur_idx = next(batch_counter)
             total = self.test_dataset.all_rays.shape[0]
