@@ -1,4 +1,5 @@
 import os
+import shutil
 from itertools import repeat, chain, count
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -100,63 +101,73 @@ class Merger(Evaluator):
         aval_cnt = count()
         aval_id = []
         aval_rep = []
-
-        with TemporaryDirectory(dir=pts_path.parent) as tmpdir:
+        prefix = f'{Path(pts_path).stem}_'
+        with TemporaryDirectory(dir=os.path.dirname(pts_path)) as tmpdir:
             for chunk_idx in trange(N_rays_all // chunk + int(N_rays_all % chunk > 0), desc='sample_filter_dataset'):
                 rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk].to(self.device)
                 xyz_sampled, z_vals, dists, viewdirs, ray_valid = self.tensorf.sample_and_filter_rays(
                     rays_chunk, is_train=False, ndc_ray=self.args.ndc_ray, N_samples=512)
                 app_mask, app_alpha = self.filter_pts(xyz_sampled, dists, ray_valid)
                 if app_mask.any():
-                    np.save(pts_path.with_stem(f'aval_pts_tmp_{next(aval_cnt)}'),
+                    np.save(os.path.join(tmpdir, f'{prefix}{next(aval_cnt)}.npy'),
                             torch.concat((xyz_sampled[app_mask], viewdirs[app_mask]), dim=-1).cpu().numpy())
                     _, ind = app_alpha.max(dim=-1)
                     chunk_mask = app_mask.any(dim=-1)
                     ind = ind[chunk_mask]
                     chunk_rep, = chunk_mask.nonzero(as_tuple=True)
-                    aval_rep.append(
-                        torch.concat((xyz_sampled[chunk_rep, ind], viewdirs[chunk_rep, ind]), dim=-1).cpu().numpy())
+                    aval_rep.append(torch.cat((xyz_sampled[chunk_rep, ind], viewdirs[chunk_rep, ind]), dim=-1).cpu())
                 aval_id.append(app_mask.count_nonzero(dim=-1).cpu())
 
             del rays
+
+            self.logger.info('sample_filter_dataset done. Concatenating files...')
             aval_cnt = next(aval_cnt)
-            aval_id = torch.concat(aval_id, dim=0)
+            aval_id = torch.cat(aval_id, dim=0)
             id_cnt = aval_id.sum().item()
             ind, = torch.nonzero(aval_id, as_tuple=True)
             aval_id = torch.stack((ind, aval_id[ind]), dim=-1)
-            aval_rep = np.concatenate(aval_rep, axis=0)
-            aval_pts = [open_memmap(pts_path.with_stem(f'aval_pts_tmp_{cur_id}'), mode='r') for cur_id in range(aval_cnt)]
-            aval_pts_out = open_memmap(pts_path.with_stem(f'aval_pts_out'), mode='w+', shape=(id_cnt, 6))
-            aval_pts = np.concatenate(aval_pts, axis=0, out=aval_pts_out)
+            aval_rep = torch.cat(aval_rep, dim=0)
+            aval_pts = [open_memmap(os.path.join(tmpdir, f'{prefix}{cur_id}.npy'), mode='r') for cur_id in
+                        range(aval_cnt)]
+            aval_pts = np.concatenate(aval_pts, axis=0, out=open_memmap(pts_path, mode='w+', shape=(id_cnt, 6)))
 
+        aval_pts = torch.from_numpy(aval_pts)
         return aval_pts, aval_id, aval_rep
 
     @torch.no_grad()
-    def load_all_query_pts(self, ptsPath: Path, pts):
-        if ptsPath.exists():
-            all_query_pts = torch.from_numpy(open_memmap(ptsPath, mode='r')).to(self.device)
-            assert torch.allclose(pts, all_query_pts.view(-1, 7, 3)[:, 0])
-        else:
-            dx = torch.tensor((self.tensorf.stepSize, 0., 0.), device=self.device)
-            dy = torch.tensor((0., self.tensorf.stepSize, 0.), device=self.device)
-            dz = torch.tensor((0., 0., self.tensorf.stepSize), device=self.device)
-            pts_diff = torch.stack((pts + dx, pts + dy, pts + dz, pts - dx, pts - dy, pts - dz), dim=1)
-            all_query_pts = torch.concat((pts.unsqueeze(dim=1), pts_diff), dim=1).view(-1, 3)
-            np.save(ptsPath, all_query_pts.cpu().numpy())
+    def load_all_query_pts(self, pts_path: Path, pts):
+        if pts_path.exists():
+            self.logger.info('Loading all_query_pts from cached into GPU...')
+            all_query_pts = torch.from_numpy(open_memmap(pts_path, mode='r')).to(self.device)
+            if torch.allclose(pts, all_query_pts.view(-1, 7, 3)[:, 0]):
+                return all_query_pts
+            self.logger.warn('Cached query_pts mismatch. Regenerating...')
+            parent = pts_path.parent
+            shutil.rmtree(parent, ignore_errors=True)
+            parent.mkdir(exist_ok=True)
+
+        self.logger.warn('Generating all_query_pts using CUDA...')
+        dx = torch.tensor((self.tensorf.stepSize, 0., 0.), device=self.device)
+        dy = torch.tensor((0., self.tensorf.stepSize, 0.), device=self.device)
+        dz = torch.tensor((0., 0., self.tensorf.stepSize), device=self.device)
+        pts_diff = torch.stack((pts + dx, pts + dy, pts + dz, pts - dx, pts - dy, pts - dz), dim=1)
+        all_query_pts = torch.concat((pts.unsqueeze(dim=1), pts_diff), dim=1).view(-1, 3)
+        np.save(pts_path, all_query_pts.cpu().numpy())
         return all_query_pts
 
     @torch.no_grad()
-    def load_aval_pts(self, ptsPath: Path):
-        ptsPath = ptsPath.with_stem('aval_pts')
-        if ptsPath.exists():
-            aval_pts = torch.from_numpy(open_memmap(ptsPath, mode='r'))
-            aval_id = torch.from_numpy(open_memmap(ptsPath.with_stem('aval_id'), mode='r'))
-            aval_rep = torch.from_numpy(open_memmap(ptsPath.with_stem('aval_rep'), mode='r'))
+    def load_aval_pts(self, pts_path: Path):
+        pts_path = pts_path.with_stem('aval_pts')
+        if pts_path.exists():
+            self.logger.info('Loading aval_pts from cached...')
+            aval_pts = torch.from_numpy(open_memmap(pts_path, mode='r'))
+            aval_id = torch.from_numpy(open_memmap(pts_path.with_stem('aval_id'), mode='r'))
+            aval_rep = torch.from_numpy(open_memmap(pts_path.with_stem('aval_rep'), mode='r'))
         else:
-            aval_pts, aval_id, aval_rep = self.sample_filter_dataset(ptsPath)
-            np.save(ptsPath, aval_pts.numpy())
-            np.save(ptsPath.with_stem('aval_id'), aval_id.numpy())
-            np.save(ptsPath.with_stem('aval_rep'), aval_rep.numpy())
+            self.logger.warn('Calc aval_pts using CUDA...')
+            aval_pts, aval_id, aval_rep = self.sample_filter_dataset(pts_path)
+            np.save(pts_path.with_stem('aval_id'), aval_id.numpy())
+            np.save(pts_path.with_stem('aval_rep'), aval_rep.numpy())
 
         return aval_pts, aval_id, aval_rep
 
@@ -184,17 +195,19 @@ class Merger(Evaluator):
         return ball_dists, ball_idx, ball_knn
 
     @torch.no_grad()
-    def load_knn_pts(self, ptsPath: Path, pts, aval_rep):
-        ptsPath = ptsPath.with_stem('knn_ret_dists')
-        if ptsPath.exists():
-            knn_dists = torch.from_numpy(open_memmap(ptsPath, mode='r')).squeeze(0)
-            knn_idx = torch.from_numpy(open_memmap(ptsPath.with_stem('knn_ret_idx'), mode='r')).squeeze(0)
+    def load_knn_pts(self, pts_path: Path, pts, aval_rep):
+        pts_path = pts_path.with_stem('knn_ret_dists')
+        if pts_path.exists():
+            self.logger.info('Loading knn_pts from cached...')
+            knn_dists = torch.from_numpy(open_memmap(pts_path, mode='r'))
+            knn_idx = torch.from_numpy(open_memmap(pts_path.with_stem('knn_ret_idx'), mode='r'))
         else:
-            knn_ret = knn_points(pts[None].cuda(), aval_rep[None, ..., :3].cuda(), K=100, return_sorted=True)
-            np.save(ptsPath, knn_ret.dists.cpu().numpy())
-            np.save(ptsPath.with_stem('knn_ret_idx'), knn_ret.idx.cpu().numpy())
-            knn_dists, knn_idx, _ = knn_ret
-        return knn_dists, knn_idx
+            self.logger.warn('Calc knn_pts using CUDA...')
+            knn_dists, knn_idx, _ = knn_points(pts[None].cuda(), aval_rep[None, ..., :3].cuda(), K=100,
+                                               return_sorted=True)
+            np.save(pts_path, (knn_dists := knn_dists.cpu()).numpy())
+            np.save(pts_path.with_stem('knn_ret_idx'), (knn_idx := knn_idx.cpu()).numpy())
+        return knn_dists.squeeze(0), knn_idx.squeeze(0)
 
     @torch.no_grad()
     def generate_grad(self, pts):
@@ -284,14 +297,14 @@ class Merger(Evaluator):
         loss = None
 
         grad_vars = self.target.renderModule.mlp_control.parameters()
-        self.optimizer = torch.optim.Adam(grad_vars, lr=0.0001, betas=(0.9, 0.99))
+        self.optimizer = torch.optim.Adam(grad_vars, lr=0.01, betas=(0.9, 0.99))
         save_path.mkdir(exist_ok=True)
         (save_path / 'rgbd').mkdir(exist_ok=True)
 
         batch_counter = count()
         for cur_pts, cur_mask, cur_dist in pbar:
             loss_dict = self.train_one_batch(cur_mask, cur_pts)
-            pbar.set_description(', '.join(f'{k}: {v:.4f}' for k, v in loss_dict))
+            pbar.set_description(', '.join(f'{k}: {v:.4f}' for k, v in loss_dict.items()))
 
             cur_idx = next(batch_counter)
             total = self.test_dataset.all_rays.shape[0]
