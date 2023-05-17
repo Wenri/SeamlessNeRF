@@ -9,7 +9,6 @@ import torch
 from einops import rearrange
 from numpy.lib.format import open_memmap
 from pytorch3d.ops import knn_points, ball_query
-from torch import from_numpy
 from torch.utils.data import TensorDataset, DataLoader
 from tqdm import tqdm, trange
 from trimesh import PointCloud
@@ -98,7 +97,7 @@ class Merger(Evaluator):
     def sample_filter_dataset(self, pts_path, chunk=64 * 1024):
         rays = torch.concat((self.alt_dataset.all_rays.view(-1, 6), self.test_dataset.all_rays.view(-1, 6)), dim=0)
         N_rays_all = rays.shape[0]
-        aval_cnt = count()
+        cnt = count()
         aval_id = []
         aval_rep = []
         prefix = f'{Path(pts_path).stem}_'
@@ -109,7 +108,7 @@ class Merger(Evaluator):
                     rays_chunk, is_train=False, ndc_ray=self.args.ndc_ray, N_samples=512)
                 app_mask, app_alpha = self.filter_pts(xyz_sampled, dists, ray_valid)
                 if app_mask.any():
-                    np.save(os.path.join(tmpdir, f'{prefix}{next(aval_cnt)}.npy'),
+                    np.save(os.path.join(tmpdir, f'{prefix}{next(cnt)}.npy'),
                             torch.concat((xyz_sampled[app_mask], viewdirs[app_mask]), dim=-1).cpu().numpy())
                     _, ind = app_alpha.max(dim=-1)
                     chunk_mask = app_mask.any(dim=-1)
@@ -117,22 +116,16 @@ class Merger(Evaluator):
                     chunk_rep, = chunk_mask.nonzero(as_tuple=True)
                     aval_rep.append(torch.cat((xyz_sampled[chunk_rep, ind], viewdirs[chunk_rep, ind]), dim=-1).cpu())
                 aval_id.append(app_mask.count_nonzero(dim=-1).cpu())
-
             del rays
-
-            self.logger.info('sample_filter_dataset done. Concatenating files...')
-            aval_cnt = next(aval_cnt)
+            self.logger.warn('sample_filter_dataset done. Concatenating files...')
             aval_id = torch.cat(aval_id, dim=0)
             id_cnt = aval_id.sum().item()
             ind, = torch.nonzero(aval_id, as_tuple=True)
             aval_id = torch.stack((ind, aval_id[ind]), dim=-1)
             aval_rep = torch.cat(aval_rep, dim=0)
-            aval_pts = [open_memmap(os.path.join(tmpdir, f'{prefix}{cur_id}.npy'), mode='r') for cur_id in
-                        range(aval_cnt)]
+            aval_pts = [open_memmap(os.path.join(tmpdir, f'{prefix}{cur}.npy'), mode='r') for cur in range(next(cnt))]
             aval_pts = np.concatenate(aval_pts, axis=0, out=open_memmap(pts_path, mode='w+', shape=(id_cnt, 6)))
-
-        aval_pts = torch.from_numpy(aval_pts)
-        return aval_pts, aval_id, aval_rep
+        return torch.from_numpy(aval_pts), aval_id, aval_rep
 
     @torch.no_grad()
     def load_all_query_pts(self, pts_path: Path, pts):
@@ -173,40 +166,41 @@ class Merger(Evaluator):
 
     @torch.no_grad()
     def load_ball_pts(self, ptsPath: Path, pts, all_query_pts, aval_rep):
-        ptsPath = ptsPath.with_stem('ball_ret_dists.2')
+        ptsPath = ptsPath.with_stem('ball_dists')
         if ptsPath.exists():
-            ball_dists = rearrange(from_numpy(open_memmap(ptsPath, mode='r')), '1 (n d) k -> n d k', n=pts.shape[0])
-            ball_idx = from_numpy(open_memmap(ptsPath.with_stem('ball_ret_idx.2'), mode='r')).view(*ball_dists.shape)
-            ball_knn = from_numpy(open_memmap(ptsPath.with_stem('ball_ret_knn.2'), mode='r')).view(*ball_dists.shape, 3)
+            self.logger.info('Loading ball_pts from cached...')
+            ball_dists = torch.from_numpy(open_memmap(ptsPath, mode='r'))
+            ball_idx = torch.from_numpy(open_memmap(ptsPath.with_stem('ball_idx'), mode='r'))
+            ball_knn = torch.from_numpy(open_memmap(ptsPath.with_stem('ball_knn'), mode='r'))
         else:
+            self.logger.warn('Calc ball_pts using CUDA...')
             aval_rep_pts = aval_rep[None, ..., :3].cuda()
             knn_ret = knn_points(pts[None].cuda(), aval_rep_pts, K=1, return_sorted=False)
-            median_dist = torch.sqrt(knn_ret.dists).median().item()
-            print(knn_ret.dists.min().item(), knn_ret.dists.max().item(), median_dist)
-            median_dist = max(median_dist, self.tensorf.stepSize) * 2
-            ball_ret = ball_query(all_query_pts[None].cuda(), aval_rep_pts, K=10, radius=median_dist)
-            np.save(ptsPath.with_stem('ball_ret_dists.2'), ball_ret.dists.cpu().numpy())
-            np.save(ptsPath.with_stem('ball_ret_idx.2'), ball_ret.idx.cpu().numpy())
-            np.save(ptsPath.with_stem('ball_ret_knn.2'), ball_ret.knn.cpu().numpy())
-            ball_dists = rearrange(ball_ret.dists, '1 (n d) k -> n d k', n=pts.shape[0])
-            ball_idx = ball_ret.idx.view(*ball_dists.shape)
-            ball_knn = ball_ret.knn.view(*ball_dists.shape, 3)
+            mdn = torch.sqrt(knn_ret.dists).median().item()
+            self.logger.warn('Min %f, Max %f, Mdn %f', knn_ret.dists.min().item(), knn_ret.dists.max().item(), mdn)
+            mdn = max(mdn, self.tensorf.stepSize) * 2
+            self.logger.warn('Using Mdn = %f', mdn)
+            ball_dists, ball_idx, ball_knn = ball_query(all_query_pts[None].cuda(), aval_rep_pts, K=10, radius=mdn)
+            np.save(ptsPath, (ball_dists := ball_dists.cpu()).numpy())
+            np.save(ptsPath.with_stem('ball_idx'), (ball_idx := ball_idx.cpu()).numpy())
+            np.save(ptsPath.with_stem('ball_knn'), (ball_knn := ball_knn.cpu()).numpy())
 
-        return ball_dists, ball_idx, ball_knn
+        ball_dists = rearrange(ball_dists, '1 (n d) k -> n d k', n=pts.shape[0])
+        return ball_dists, ball_idx.view(*ball_dists.shape), ball_knn.view(*ball_dists.shape, 3)
 
     @torch.no_grad()
     def load_knn_pts(self, pts_path: Path, pts, aval_rep):
-        pts_path = pts_path.with_stem('knn_ret_dists')
+        pts_path = pts_path.with_stem('knn_dists')
         if pts_path.exists():
             self.logger.info('Loading knn_pts from cached...')
             knn_dists = torch.from_numpy(open_memmap(pts_path, mode='r'))
-            knn_idx = torch.from_numpy(open_memmap(pts_path.with_stem('knn_ret_idx'), mode='r'))
+            knn_idx = torch.from_numpy(open_memmap(pts_path.with_stem('knn_idx'), mode='r'))
         else:
             self.logger.warn('Calc knn_pts using CUDA...')
             knn_dists, knn_idx, _ = knn_points(pts[None].cuda(), aval_rep[None, ..., :3].cuda(), K=100,
                                                return_sorted=True)
             np.save(pts_path, (knn_dists := knn_dists.cpu()).numpy())
-            np.save(pts_path.with_stem('knn_ret_idx'), (knn_idx := knn_idx.cpu()).numpy())
+            np.save(pts_path.with_stem('knn_idx'), (knn_idx := knn_idx.cpu()).numpy())
         return knn_dists.squeeze(0), knn_idx.squeeze(0)
 
     @torch.no_grad()
