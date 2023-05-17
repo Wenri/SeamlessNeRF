@@ -1,3 +1,9 @@
+import logging
+import os
+import resource
+from contextlib import suppress
+
+
 def config_parser(cmd=None):
     import configargparse
     import train
@@ -27,10 +33,12 @@ def command(args):
 
 # A function to set up the running environment for the training
 def setup_environment(cudaMallocAsync=True):
-    import os
-    import logging
-
-    from contextlib import suppress
+    try:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
+    except ValueError:
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if soft < hard:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
 
     if cudaMallocAsync:
         os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'backend:cudaMallocAsync'
