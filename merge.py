@@ -125,7 +125,7 @@ class Merger(Evaluator):
             aval_id = torch.stack((ind, aval_id[ind]), dim=-1)
             aval_rep = torch.cat(aval_rep, dim=0)
             aval_pts = [open_memmap(os.path.join(tmpdir, f'{prefix}{cur}.npy'), mode='r') for cur in range(next(cnt))]
-            aval_out = open_memmap(pts_path, mode='w+', shape=(id_cnt, 6))
+            aval_out = open_memmap(pts_path, mode='w+', shape=(id_cnt, 6), dtype=np.float32)
             aval_pts = np.concatenate(aval_pts, axis=0, out=aval_out)
         aval_out.flush()
         return torch.from_numpy(aval_pts), aval_id, aval_rep
@@ -296,7 +296,7 @@ class Merger(Evaluator):
         loss = None
 
         grad_vars = self.target.renderModule.mlp_control.parameters()
-        self.optimizer = torch.optim.Adam(grad_vars, lr=0.01, betas=(0.9, 0.99))
+        self.optimizer = torch.optim.Adam(grad_vars, lr=0.001, betas=(0.9, 0.99))
         save_path.mkdir(exist_ok=True)
         (save_path / 'rgbd').mkdir(exist_ok=True)
 
