@@ -1,6 +1,7 @@
 import os
 from itertools import repeat, chain, count
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import numpy as np
 import torch
@@ -98,31 +99,35 @@ class Merger(Evaluator):
         N_rays_all = rays.shape[0]
         aval_cnt = count()
         aval_id = []
-        for chunk_idx in trange(N_rays_all // chunk + int(N_rays_all % chunk > 0), desc='sample_filter_dataset'):
-            rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk].to(self.device)
-            xyz_sampled, z_vals, dists, viewdirs, ray_valid = self.tensorf.sample_and_filter_rays(
-                rays_chunk, is_train=False, ndc_ray=self.args.ndc_ray, N_samples=512)
-            app_mask, app_alpha = self.filter_pts(xyz_sampled, dists, ray_valid)
-            if app_mask.any():
-                np.save(pts_path.with_stem(f'aval_pts_tmp_{(cur_id := next(aval_cnt))}'),
-                        torch.concat((xyz_sampled[app_mask], viewdirs[app_mask]), dim=-1).cpu().numpy())
-                _, ind = app_alpha.max(dim=-1)
-                chunk_mask = app_mask.any(dim=-1)
-                ind = ind[chunk_mask]
-                chunk_rep, = chunk_mask.nonzero(as_tuple=True)
-                np.save(pts_path.with_stem(f'aval_rep_tmp_{cur_id}'),
-                        torch.concat((xyz_sampled[chunk_rep, ind], viewdirs[chunk_rep, ind]), dim=-1).cpu().numpy())
-            aval_id.append(app_mask.count_nonzero(dim=-1).cpu())
+        aval_rep = []
 
-        del rays
-        aval_cnt = next(aval_cnt)
-        aval_id = torch.concat(aval_id, dim=0)
-        ind, = torch.nonzero(aval_id, as_tuple=True)
-        aval_id = torch.stack((ind, aval_id[ind]), dim=-1)
-        aval_pts = [open_memmap(pts_path.with_stem(f'aval_pts_tmp_{cur_id}'), mode='r') for cur_id in range(aval_cnt)]
-        aval_pts = np.concatenate(aval_pts, axis=0)
-        aval_rep = [open_memmap(pts_path.with_stem(f'aval_rep_tmp_{cur_id}'), mode='r') for cur_id in range(aval_cnt)]
-        aval_rep = np.concatenate(aval_rep, axis=0)
+        with TemporaryDirectory(dir=pts_path.parent) as tmpdir:
+            for chunk_idx in trange(N_rays_all // chunk + int(N_rays_all % chunk > 0), desc='sample_filter_dataset'):
+                rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk].to(self.device)
+                xyz_sampled, z_vals, dists, viewdirs, ray_valid = self.tensorf.sample_and_filter_rays(
+                    rays_chunk, is_train=False, ndc_ray=self.args.ndc_ray, N_samples=512)
+                app_mask, app_alpha = self.filter_pts(xyz_sampled, dists, ray_valid)
+                if app_mask.any():
+                    np.save(pts_path.with_stem(f'aval_pts_tmp_{next(aval_cnt)}'),
+                            torch.concat((xyz_sampled[app_mask], viewdirs[app_mask]), dim=-1).cpu().numpy())
+                    _, ind = app_alpha.max(dim=-1)
+                    chunk_mask = app_mask.any(dim=-1)
+                    ind = ind[chunk_mask]
+                    chunk_rep, = chunk_mask.nonzero(as_tuple=True)
+                    aval_rep.append(
+                        torch.concat((xyz_sampled[chunk_rep, ind], viewdirs[chunk_rep, ind]), dim=-1).cpu().numpy())
+                aval_id.append(app_mask.count_nonzero(dim=-1).cpu())
+
+            del rays
+            aval_cnt = next(aval_cnt)
+            aval_id = torch.concat(aval_id, dim=0)
+            id_cnt = aval_id.sum().item()
+            ind, = torch.nonzero(aval_id, as_tuple=True)
+            aval_id = torch.stack((ind, aval_id[ind]), dim=-1)
+            aval_rep = np.concatenate(aval_rep, axis=0)
+            aval_pts = [open_memmap(pts_path.with_stem(f'aval_pts_tmp_{cur_id}'), mode='r') for cur_id in range(aval_cnt)]
+            aval_pts_out = open_memmap(pts_path.with_stem(f'aval_pts_out'), mode='w+', shape=(id_cnt, 6))
+            aval_pts = np.concatenate(aval_pts, axis=0, out=aval_pts_out)
 
         return aval_pts, aval_id, aval_rep
 
