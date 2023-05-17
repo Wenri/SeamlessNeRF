@@ -1,5 +1,6 @@
 import os
 import shutil
+from contextlib import suppress
 from itertools import repeat, chain, count
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -124,16 +125,19 @@ class Merger(Evaluator):
             aval_id = torch.stack((ind, aval_id[ind]), dim=-1)
             aval_rep = torch.cat(aval_rep, dim=0)
             aval_pts = [open_memmap(os.path.join(tmpdir, f'{prefix}{cur}.npy'), mode='r') for cur in range(next(cnt))]
-            aval_pts = np.concatenate(aval_pts, axis=0, out=open_memmap(pts_path, mode='w+', shape=(id_cnt, 6)))
+            aval_out = open_memmap(pts_path, mode='w+', shape=(id_cnt, 6))
+            aval_pts = np.concatenate(aval_pts, axis=0, out=aval_out)
+        aval_out.flush()
         return torch.from_numpy(aval_pts), aval_id, aval_rep
 
     @torch.no_grad()
     def load_all_query_pts(self, pts_path: Path, pts):
         if pts_path.exists():
             self.logger.info('Loading all_query_pts from cached into GPU...')
-            all_query_pts = torch.from_numpy(open_memmap(pts_path, mode='r')).to(self.device)
-            if torch.allclose(pts, all_query_pts.view(-1, 7, 3)[:, 0]):
-                return all_query_pts
+            with suppress(Exception):
+                all_query_pts = torch.from_numpy(open_memmap(pts_path, mode='r')).to(self.device)
+                if torch.allclose(pts, all_query_pts.view(-1, 7, 3)[:, 0]):
+                    return all_query_pts
             self.logger.warn('Cached query_pts mismatch. Regenerating...')
             parent = pts_path.parent
             shutil.rmtree(parent, ignore_errors=True)
@@ -153,15 +157,16 @@ class Merger(Evaluator):
         pts_path = pts_path.with_stem('aval_pts')
         if pts_path.exists():
             self.logger.info('Loading aval_pts from cached...')
-            aval_pts = torch.from_numpy(open_memmap(pts_path, mode='r'))
-            aval_id = torch.from_numpy(open_memmap(pts_path.with_stem('aval_id'), mode='r'))
-            aval_rep = torch.from_numpy(open_memmap(pts_path.with_stem('aval_rep'), mode='r'))
-        else:
-            self.logger.warn('Calc aval_pts using CUDA...')
-            aval_pts, aval_id, aval_rep = self.sample_filter_dataset(pts_path)
-            np.save(pts_path.with_stem('aval_id'), aval_id.numpy())
-            np.save(pts_path.with_stem('aval_rep'), aval_rep.numpy())
+            with suppress(Exception):
+                aval_pts = torch.from_numpy(open_memmap(pts_path, mode='r'))
+                aval_id = torch.from_numpy(open_memmap(pts_path.with_stem('aval_id'), mode='r'))
+                aval_rep = torch.from_numpy(open_memmap(pts_path.with_stem('aval_rep'), mode='r'))
+                return aval_pts, aval_id, aval_rep
 
+        self.logger.warn('Calc aval_pts using CUDA...')
+        aval_pts, aval_id, aval_rep = self.sample_filter_dataset(pts_path)
+        np.save(pts_path.with_stem('aval_id'), aval_id.numpy())
+        np.save(pts_path.with_stem('aval_rep'), aval_rep.numpy())
         return aval_pts, aval_id, aval_rep
 
     @torch.no_grad()
