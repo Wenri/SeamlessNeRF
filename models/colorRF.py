@@ -12,6 +12,13 @@ from .tensoRF import TensorVMSplit
 from .tensorBase import AlphaGridMask
 
 
+def torch_copy(obj):
+    buffer = io.BytesIO()  # read from buffer
+    torch.save(obj, buffer)
+    buffer.seek(0)  # <--- must see to origin every time before reading
+    return torch.load(buffer)
+
+
 class NormalizeCoordMasked:
     def __init__(self, pts, valid_mask):
         super().__init__()
@@ -122,6 +129,11 @@ class ColorVMSplit(TensorVMSplit):
         xyz_sampled = shift_and_scale(xyz_sampled)
         return func(xyz_sampled)
 
+    def get_appparam(self):
+        if self.renderModule.ignore_control or not hasattr(self, 'app_plane_ctl'):
+            return super().get_appparam()
+        return self.app_plane_ctl, self.app_line_ctl
+
     def compute_validmask(self, xyz_sampled: torch.Tensor, bitmap=False):
         ray_valid = super().compute_validmask(xyz_sampled).int()
         shift_and_scale = getattr(self.alphaMask, 'shift_and_scale', torch.nn.Identity())
@@ -163,14 +175,20 @@ class ColorVMSplit(TensorVMSplit):
             self.args = args
         return super().forward(*params, **kwargs)
 
+    def enable_trainable_control(self):
+        self.add_module('app_plane_ctl', torch_copy(self.app_plane))
+        self.add_module('app_line_ctl', torch_copy(self.app_line))
+
 
 class PoissonMLPRender(MLPRender_Fea):
     def __init__(self, inChanel, viewpe=6, feape=6, featureC=128, **kwargs):
         super().__init__(inChanel, viewpe, feape, featureC)
         self.orig_rgb = None
+        self.ignore_control = False
 
-    def forward(self, pts, viewdirs, features, ignore_control=False):
-        add_control = hasattr(self, 'mlp_control') and not ignore_control
+    def forward(self, pts, viewdirs, features):
+        add_control = hasattr(self, 'mlp_control') and not self.ignore_control
+        self.orig_rgb = None
         with self.mlp.register_forward_hook(self.mlp_forward_hook) if add_control else nullcontext():
             rgb = super().forward(pts, viewdirs, features)
         return rgb
@@ -180,10 +198,7 @@ class PoissonMLPRender(MLPRender_Fea):
         return output + self.mlp_control(*data_in)
 
     def enable_trainable_control(self):
-        buffer = io.BytesIO()  # read from buffer
-        torch.save(self.mlp, buffer)
-        buffer.seek(0)  # <--- must see to origin every time before reading
-        new_mlp = torch.load(buffer)
+        new_mlp = torch_copy(self.mlp)
         zero_conv = nn.Linear(3, 3)
         torch.nn.init.constant_(zero_conv.bias, 0)
         torch.nn.init.constant_(zero_conv.weight, 0)

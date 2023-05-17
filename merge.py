@@ -228,11 +228,9 @@ class Merger(Evaluator):
         all_query_pts = torch.cat((all_query_pts, pts_viewdir), dim=-1)
         return all_query_pts, mask, dists.view(*mask.shape).cpu()
 
-    def compute_diff_loss(self, sigma_feature: DensityFeature, rgb, bit_mask):
+    def compute_diff_loss(self, sigma_feature: DensityFeature, rgb, orig_rgb, bit_mask):
         pts = sigma_feature.pts
         mask = pts.valid_mask
-        orig_rgb = torch.zeros((*mask.shape, 3), device=self.device)
-        orig_rgb[mask] = torch.sigmoid(self.target.renderModule.orig_rgb)
         diff = rgb[:, 0:1, :] - rgb[:, 1:, :]
         diff_ogt = orig_rgb[:, 0:1, :] - orig_rgb[:, 1:, :]
 
@@ -252,11 +250,9 @@ class Merger(Evaluator):
         loss = {'loss_diff': loss_diff.mean(), 'loss_pin': loss_pin.mean()}
         return loss
 
-    def compute_diff_loss2(self, sigma_feature: DensityFeature, rgb, bit_mask):
+    def compute_diff_loss2(self, sigma_feature: DensityFeature, rgb, orig_rgb, bit_mask):
         pts = sigma_feature.pts
         mask = pts.valid_mask
-        orig_rgb = torch.zeros((*mask.shape, 3), device=self.device)
-        orig_rgb[mask] = torch.sigmoid(self.target.renderModule.orig_rgb)
         diff = rgb[:, 0:1, :] - rgb[:, 1:, :]
         diff_ogt = orig_rgb[:, 0:1, :] - orig_rgb[:, 1:, :]
 
@@ -270,6 +266,7 @@ class Merger(Evaluator):
         cur_mask = bit_mask.bool()
         sigma = torch.zeros(cur_mask.shape, device=self.device)
         rgb = torch.zeros((*cur_mask.shape, 3), device=self.device)
+        orig_rgb = torch.zeros((*cur_mask.shape, 3), device=self.device)
 
         with torch.no_grad():
             cur_dirs = cur_pts[..., 3:].to(self.device)
@@ -278,9 +275,13 @@ class Merger(Evaluator):
             sigma_feature = self.tensorf.compute_densityfeature(xyz_sampled[cur_mask])
             validsigma = self.tensorf.feature2density(sigma_feature)
             sigma.masked_scatter_(cur_mask, validsigma)
+            self.target.renderModule.ignore_control = True
+            orig_rgb[cur_mask] = self.tensorf.compute_radiance(xyz_sampled[cur_mask], cur_dirs[cur_mask])
+            assert self.tensorf.renderModule.orig_rgb is None
 
+        self.target.renderModule.ignore_control = False
         rgb[cur_mask] = self.tensorf.compute_radiance(xyz_sampled[cur_mask], cur_dirs[cur_mask])
-        loss_dict = self.compute_diff_loss(sigma_feature, rgb, bit_mask)
+        loss_dict = self.compute_diff_loss(sigma_feature, rgb, orig_rgb, bit_mask)
         loss_total = sum(loss_dict.values())
         self.optimizer.zero_grad()
         loss_total.backward()
@@ -295,7 +296,11 @@ class Merger(Evaluator):
         pbar = tqdm(chain.from_iterable(repeat(data_loader)))
         loss = None
 
-        grad_vars = self.target.renderModule.mlp_control.parameters()
+        grad_vars = chain(
+            self.target.renderModule.mlp_control.parameters(),
+            self.target.app_plane_ctl.parameters(),
+            self.target.app_line_ctl.parameters()
+        )
         self.optimizer = torch.optim.Adam(grad_vars, lr=0.001, betas=(0.9, 0.99))
         save_path.mkdir(exist_ok=True)
         (save_path / 'rgbd').mkdir(exist_ok=True)
@@ -318,6 +323,7 @@ class Merger(Evaluator):
         if self.args.export_mesh:
             self.export_mesh(prefix=os.path.basename(self.args.datadir))
         self.target.renderModule.enable_trainable_control()
+        self.target.enable_trainable_control()
         self.tensorf.add_merge_target(self.target)
         if self.args.export_mesh:
             self.export_mesh(self.target)
