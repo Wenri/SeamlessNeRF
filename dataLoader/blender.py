@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 
 from PIL import Image
 from einops import rearrange
@@ -39,8 +40,10 @@ class BlenderDataset(Dataset):
         return depth
 
     def read_frame(self, file_path):
-        image_path = os.path.join(self.root_dir, f"{file_path}.png")
-        self.image_paths.append(image_path)
+        image_path = Path(self.root_dir, file_path)
+        if not image_path.suffix:
+            image_path = image_path.with_suffix(".png")
+        self.image_paths.append(os.fspath(image_path))
         img = Image.open(image_path)
 
         if self.downsample != 1.0:
