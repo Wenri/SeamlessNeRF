@@ -302,11 +302,12 @@ class TensorBase(torch.nn.Module):
 
         sigma = torch.zeros(xyz_locs.shape[:-1], device=xyz_locs.device)
 
+        xyz_sampled = self.normalize_coord(xyz_locs)
         if alpha_mask.any():
-            xyz_sampled = self.normalize_coord(xyz_locs[alpha_mask])
-            sigma_feature = self.compute_densityfeature(xyz_sampled)
+            sigma_feature = self.compute_densityfeature(xyz_sampled[alpha_mask])
             validsigma = self.feature2density(sigma_feature)
             sigma[alpha_mask] = validsigma
+            length = self.scale_distance(xyz_sampled, length, scale=torch.ones_like(sigma))
 
         alpha = 1 - torch.exp(-sigma * length).view(xyz_locs.shape[:-1])
 
@@ -335,8 +336,10 @@ class TensorBase(torch.nn.Module):
 
         return xyz_sampled, z_vals, dists, viewdirs, ray_valid
 
-    def scale_distance(self, xyz_sampled, dists):
-        return dists * self.distance_scale
+    def scale_distance(self, xyz_sampled, dists, scale=None):
+        if scale is None:
+            scale = self.distance_scale
+        return dists * scale
 
     def forward(self, rays_chunk, white_bg=True, is_train=False, ndc_ray=False, N_samples=-1, **kwargs):
 

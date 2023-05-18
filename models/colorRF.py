@@ -117,7 +117,8 @@ class ColorVMSplit(TensorVMSplit):
         else:
             self.alphaMask.append(model.alphaMask)
 
-        self.render_gap = self.stepSize / model.stepSize / 0.27
+        # self.render_gap = self.stepSize / model.stepSize / 0.23
+        self.render_gap = 3.0
         if isinstance(model, type(self)):
             self.merge_target.extend(model.merge_target)
             model = super(type(self), model)
@@ -156,7 +157,12 @@ class ColorVMSplit(TensorVMSplit):
     def feature2density(self, feature: DensityFeature):
         density = [model.feature2density(feat) for model, feat in
                    zip_longest(self.merge_target, feature, fillvalue=super())]
-        density, idx = torch.stack(density, dim=0).max(dim=0)
+        if len(density) == 2:
+            tgt, src = density
+            _, idx = torch.stack((tgt * self.render_gap, src), dim=0).max(dim=0)
+            density = torch.where(idx > 0.5, src, tgt)
+        else:
+            density, idx = torch.stack(density, dim=0).max(dim=0)
         feature.set_index(idx)
         return density
 
@@ -172,8 +178,8 @@ class ColorVMSplit(TensorVMSplit):
         self.tgt_rgb = tgt
         return rgb
 
-    def scale_distance(self, xyz_sampled, dists):
-        dists = super().scale_distance(xyz_sampled, dists)
+    def scale_distance(self, xyz_sampled, dists, scale=None):
+        dists = super().scale_distance(xyz_sampled, dists, scale)
         if self.render_gap == 1 or not hasattr(xyz_sampled, 'get_index'):
             return dists
 

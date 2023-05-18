@@ -86,9 +86,10 @@ class Merger(Evaluator):
         app_mask = torch.zeros_like(ray_valid)
         app_alpha = torch.zeros_like(ray_valid, dtype=torch.float32)
         if ray_valid.any():
-            sigma_feature = self.tensorf.compute_densityfeature(
-                self.tensorf.normalize_coord(xyz_sampled)[ray_valid])
+            xyz_sampled = self.tensorf.normalize_coord(xyz_sampled)
+            sigma_feature = self.tensorf.compute_densityfeature(xyz_sampled[ray_valid])
             validsigma = self.tensorf.feature2density(sigma_feature)
+            dists = self.tensorf.scale_distance(xyz_sampled, dists, scale=1)
             alpha = 1. - torch.exp(-validsigma * dists[ray_valid])
             app_mask.masked_scatter_(ray_valid, alpha > 20 * self.tensorf.rayMarch_weight_thres)
             app_alpha.masked_scatter_(ray_valid, alpha)
