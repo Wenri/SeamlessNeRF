@@ -1,0 +1,14 @@
+dataset_name = blender
+datadir = data/seamless/female_sculpture
+expname = merge_arm_over_female_sculpture
+basedir = ./log
+ckpt = ./log/merge_arm_over_female_sculpture/tensorf_female_sculpture_arms_VM.th
+N_vis = 5
+
+matrix = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+
+render_only = 1
+export_mesh = 1
+render_test = 1
+
+model_name = ColorVMSplit

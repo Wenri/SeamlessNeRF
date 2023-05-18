@@ -15,6 +15,7 @@ from .semantic_helper import VGGSemantic, PCASemantic
 
 class BlenderDataset(Dataset):
     def __init__(self, datadir, split='train', downsample=1.0, is_stack=False, N_vis=-1, semantic_type='vgg', pca=None):
+        self.white_bg = True
         self.pca = pca
         self.N_vis = N_vis
         self.root_dir = datadir
@@ -28,7 +29,6 @@ class BlenderDataset(Dataset):
         self.read_meta(semantic_type)
         self.define_proj_mat()
 
-        self.white_bg = True
         self.near_far = (2.0, 6.0)
 
         self.center = torch.mean(self.scene_bbox, axis=0).float().view(1, 1, 3)
@@ -51,7 +51,10 @@ class BlenderDataset(Dataset):
 
         img = self.transform(img)  # (4, h, w)
         if img.size(0) == 4:
-            img = img[:3] * img[-1:] + (1 - img[-1:])  # blend A to RGB
+            if self.white_bg:
+                img = img[:3] * img[-1:] + (1 - img[-1:])  # blend A to RGB
+            else:
+                img = img[:3] * img[-1:]  # blend A to RGB
 
         # img, = kornia.filters.laplacian(img[None], 3)
         self.all_rgbs.append(rearrange(img, 'c h w -> (h w) c'))  # RGBA
