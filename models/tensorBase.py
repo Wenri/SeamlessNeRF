@@ -335,6 +335,9 @@ class TensorBase(torch.nn.Module):
 
         return xyz_sampled, z_vals, dists, viewdirs, ray_valid
 
+    def scale_distance(self, xyz_sampled, dists):
+        return dists * self.distance_scale
+
     def forward(self, rays_chunk, white_bg=True, is_train=False, ndc_ray=False, N_samples=-1, **kwargs):
 
         xyz_sampled, z_vals, dists, viewdirs, ray_valid = self.sample_and_filter_rays(
@@ -350,7 +353,7 @@ class TensorBase(torch.nn.Module):
             validsigma = self.feature2density(sigma_feature)
             sigma.masked_scatter_(ray_valid, validsigma)
 
-        alpha, weight, bg_weight = raw2alpha(sigma, dists * self.distance_scale)
+        alpha, weight, bg_weight = raw2alpha(sigma, self.scale_distance(xyz_sampled, dists))
 
         app_mask = weight > self.rayMarch_weight_thres
 

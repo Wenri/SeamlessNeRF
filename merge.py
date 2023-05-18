@@ -330,8 +330,8 @@ class Merger(Evaluator):
             self.export_mesh()
         pts = self.export_pointcloud()
         pts, mask, dists = self.generate_grad(pts)
-        self.poisson_editing(pts, mask, dists)
         self.render_test()
+        self.poisson_editing(pts, mask, dists)
 
 
 def config_parser(parser):

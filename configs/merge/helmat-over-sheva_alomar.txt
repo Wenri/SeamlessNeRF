@@ -1,0 +1,14 @@
+dataset_name = blender
+datadir = data/gbcseldb/sheva_alomar
+expname = merge_helmat_over_sheva_alomar
+basedir = ./log
+ckpt = ./log/merge_helmat_over_sheva_alomar/tensorf_helmet_VM.th
+N_vis = 5
+
+matrix = [0.13886107504367828, -0.1838289350271225, 0.05579899996519089, -0.0032612525392323732, 0.19133037328720093, 0.13853482902050018, -0.0197429321706295, 0.010159319266676903, -0.017299795523285866, 0.05660411715507507, 0.22953373193740845, 0.6974626779556274, 0.0, 0.0, 0.0, 1.0]
+
+render_only = 1
+export_mesh = 1
+render_test = 1
+
+model_name = ColorVMSplit

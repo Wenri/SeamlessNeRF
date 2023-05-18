@@ -100,6 +100,7 @@ class ColorVMSplit(TensorVMSplit):
         self.merge_target = []
         self.args = None
         self.tgt_rgb = None
+        self.render_gap = 1
         super().__init__(*args, **kwargs)
 
     def init_render_func(self, shadingMode, pos_pe=6, view_pe=6, fea_pe=6, featureC=128, *args, **kwargs):
@@ -116,6 +117,7 @@ class ColorVMSplit(TensorVMSplit):
         else:
             self.alphaMask.append(model.alphaMask)
 
+        self.render_gap = self.stepSize / model.stepSize / 0.27
         if isinstance(model, type(self)):
             self.merge_target.extend(model.merge_target)
             model = super(type(self), model)
@@ -169,6 +171,15 @@ class ColorVMSplit(TensorVMSplit):
         rgb = torch.where((idx > 0.5).unsqueeze(-1), rgb, tgt)
         self.tgt_rgb = tgt
         return rgb
+
+    def scale_distance(self, xyz_sampled, dists):
+        dists = super().scale_distance(xyz_sampled, dists)
+        if self.render_gap == 1 or not hasattr(xyz_sampled, 'get_index'):
+            return dists
+
+        idx = xyz_sampled.get_index()
+        dists[torch.logical_not(idx)] *= self.render_gap
+        return dists
 
     def forward(self, *params, args=None, **kwargs):
         if self.args is None and args:
