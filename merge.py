@@ -302,7 +302,7 @@ class Merger(Evaluator):
             self.target.app_plane_ctl.parameters(),
             self.target.app_line_ctl.parameters()
         )
-        self.optimizer = torch.optim.Adam(grad_vars, lr=0.001, betas=(0.9, 0.99))
+        self.optimizer = torch.optim.Adam(grad_vars, lr=args.lr_basis, betas=(0.9, 0.99))
         save_path.mkdir(exist_ok=True)
         (save_path / 'rgbd').mkdir(exist_ok=True)
 
@@ -325,7 +325,7 @@ class Merger(Evaluator):
             self.export_mesh(prefix=os.path.basename(self.args.datadir))
         self.target.renderModule.enable_trainable_control()
         self.target.enable_trainable_control()
-        self.tensorf.add_merge_target(self.target)
+        self.tensorf.add_merge_target(self.target, self.args.density_gain, self.args.render_gap)
         if self.args.export_mesh:
             self.export_mesh(self.target)
             self.export_mesh()
@@ -346,6 +346,7 @@ def config_parser(parser):
 
     parser.add_argument('--downsample_test', type=float, default=1.0)
     parser.add_argument('--matrix', type=float, nargs='+', default=())
+    parser.add_argument("--lr_basis", type=float, default=1e-3, help='learning rate')
 
     parser.add_argument('--model_name', type=MODEL_ZOO.get, default='TensorVMSplit', choices=MODEL_ZOO)
     parser.add_argument('--dataset_name', type=str, default='blender', choices=dataset_dict.keys())
@@ -365,6 +366,10 @@ def config_parser(parser):
 
     # logging/saving options
     parser.add_argument("--N_vis", type=int, default=5, help='N images to vis')
+
+    # logging/saving options
+    parser.add_argument("--render_gap", type=float, help='render step size gap for target')
+    parser.add_argument("--density_gain", type=float, default=1, help='density gain for source')
 
 
 def main(args):

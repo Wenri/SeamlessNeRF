@@ -96,17 +96,19 @@ class MultipleGridMask(torch.nn.ModuleList):
 
 
 class ColorVMSplit(TensorVMSplit):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, at_least_aabb=None, **kwargs):
         self.merge_target = []
         self.args = None
         self.tgt_rgb = None
         self.render_gap = 1
+        self.density_gain = 1
+        self.at_least_aabb = at_least_aabb
         super().__init__(*args, **kwargs)
 
     def init_render_func(self, shadingMode, pos_pe=6, view_pe=6, fea_pe=6, featureC=128, *args, **kwargs):
         return super().init_render_func(shadingMode, pos_pe, view_pe, fea_pe, featureC, **kwargs)
 
-    def add_merge_target(self, model):
+    def add_merge_target(self, model, density_gain, render_gap=None):
         if isinstance(self.alphaMask, AlphaGridMask):
             self.alphaMask = MultipleGridMask(self.args.matrix, self.alphaMask)
         elif self.alphaMask is None:
@@ -117,8 +119,11 @@ class ColorVMSplit(TensorVMSplit):
         else:
             self.alphaMask.append(model.alphaMask)
 
-        # self.render_gap = self.stepSize / model.stepSize / 0.23
-        self.render_gap = 3.0
+        if render_gap is None:
+            render_gap = self.stepSize / model.stepSize
+        self.render_gap = render_gap
+        self.density_gain = density_gain
+
         if isinstance(model, type(self)):
             self.merge_target.extend(model.merge_target)
             model = super(type(self), model)
@@ -159,7 +164,7 @@ class ColorVMSplit(TensorVMSplit):
                    zip_longest(self.merge_target, feature, fillvalue=super())]
         if len(density) == 2:
             tgt, src = density
-            _, idx = torch.stack((tgt * self.render_gap, src), dim=0).max(dim=0)
+            _, idx = torch.stack((tgt * self.render_gap, src * self.density_gain), dim=0).max(dim=0)
             density = torch.where(idx > 0.5, src, tgt)
         else:
             density, idx = torch.stack(density, dim=0).max(dim=0)
@@ -195,6 +200,19 @@ class ColorVMSplit(TensorVMSplit):
     def enable_trainable_control(self):
         self.add_module('app_plane_ctl', torch_copy(self.app_plane))
         self.add_module('app_line_ctl', torch_copy(self.app_line))
+
+    def update_stepSize(self, gridSize):
+        ret = super().update_stepSize(gridSize)
+        return ret
+
+    @torch.no_grad()
+    def updateAlphaMask(self, gridSize=(200, 200, 200)):
+        new_aabb = super().updateAlphaMask(gridSize)
+        if self.at_least_aabb:
+            at_least = torch.as_tensor(self.at_least_aabb, device=new_aabb.device, dtype=new_aabb.dtype).view(-1, 3)
+            new_aabb[0] = torch.minimum(new_aabb[0], at_least[0])
+            new_aabb[1] = torch.maximum(new_aabb[1], at_least[1])
+        return new_aabb
 
 
 class PoissonMLPRender(MLPRender_Fea):

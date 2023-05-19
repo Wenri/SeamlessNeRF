@@ -128,7 +128,7 @@ class TensorBase(torch.nn.Module):
         pass
 
     def get_kwargs(self):
-        return {
+        kwargs = {
             'aabb': self.aabb,
             'gridSize': self.gridSize.tolist(),
             'density_n_comp': self.density_n_comp,
@@ -146,6 +146,10 @@ class TensorBase(torch.nn.Module):
 
             **self.shadingMode
         }
+        for kw in ('init_density_scale', 'init_app_scale', 'at_least_aabb'):
+            if (val := getattr(self, kw, None)) is not None:
+                kwargs[kw] = val
+        return kwargs
 
     def save(self, path):
         kwargs = self.get_kwargs()

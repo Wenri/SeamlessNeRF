@@ -169,6 +169,8 @@ class Trainer:
             palette = self.palette
             if self.palette_sem is not None:
                 palette = (palette, self.palette_sem)
+            kw = ('init_density_scale', 'init_app_scale', 'at_least_aabb')
+            kwargs = {k: val for k in kw if (val := getattr(args, k, None)) is not None}
             tensorf = args.model_name(
                 self.aabb, self.reso_cur, self.device,
                 density_n_comp=n_lamb_sigma, appearance_n_comp=n_lamb_sh,
@@ -178,7 +180,7 @@ class Trainer:
                 pos_pe=args.pos_pe, view_pe=args.view_pe, fea_pe=args.fea_pe,
                 featureC=args.featureC, step_ratio=args.step_ratio,
                 fea2denseAct=args.fea2denseAct, palette=palette,
-                hullVertices=self.hull_vertices.tolist())
+                hullVertices=self.hull_vertices.tolist(), **kwargs)
 
         return tensorf
 
@@ -413,6 +415,9 @@ def config_parser(parser):
     parser.add_argument("--distance_scale", type=float, default=25, help='scaling sampling distance for computation')
     parser.add_argument("--density_shift", type=float, default=-10,
                         help='shift density in softplus; making density = 0  when feature == 0')
+    parser.add_argument("--init_density_scale", type=float, help='used in init_one_svd')
+    parser.add_argument("--init_app_scale", type=float, help='used in init_one_svd')
+    parser.add_argument("--at_least_aabb", type=float, nargs='+', help='minimum bbox')
 
     # network decoder
     parser.add_argument("--shadingMode", type=RENDER_ZOO.get, default="MLP_PE", choices=RENDER_ZOO)

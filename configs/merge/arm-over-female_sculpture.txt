@@ -2,13 +2,15 @@ dataset_name = blender
 datadir = data/seamless/female_sculpture
 expname = merge_arm_over_female_sculpture
 basedir = ./log
-ckpt = ./log/merge_arm_over_female_sculpture/tensorf_female_sculpture_arms_VM.th
+ckpt = ./log/merge_arm_over_female_sculpture/tensorf_female_sculpture_arms_VM2.th
 N_vis = 5
 
 matrix = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+# matrix = [1.0669995546340942, 0.0, 0.0, 0.008616231381893158, 0.0, 1.0669995546340942, 0.0, -0.015135876834392548, 0.0, 0.0, 1.0669995546340942, -0.035136133432388306, 0.0, 0.0, 0.0, 1.0]
 
 render_only = 1
 export_mesh = 1
 render_test = 1
 
 model_name = ColorVMSplit
+density_gain = 0.1

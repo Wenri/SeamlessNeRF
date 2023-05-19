@@ -151,12 +151,15 @@ class TensorVM(TensorBase):
 
 
 class TensorVMSplit(TensorBase):
-    def __init__(self, aabb, gridSize, device, **kargs):
+    def __init__(self, aabb, gridSize, device, init_density_scale=0.1, init_app_scale=0.1, **kargs):
+        self.init_density_scale = init_density_scale
+        self.init_app_scale = init_app_scale
         super(TensorVMSplit, self).__init__(aabb, gridSize, device, **kargs)
 
     def init_svd_volume(self, res, device):
-        self.density_plane, self.density_line = self.init_one_svd(self.density_n_comp, self.gridSize, 1, device)
-        self.app_plane, self.app_line = self.init_one_svd(self.app_n_comp, self.gridSize, 1, device)
+        scale = self.init_density_scale
+        self.density_plane, self.density_line = self.init_one_svd(self.density_n_comp, self.gridSize, scale, device)
+        self.app_plane, self.app_line = self.init_one_svd(self.app_n_comp, self.gridSize, self.init_app_scale, device)
         self.basis_mat = torch.nn.Linear(sum(self.app_n_comp), self.app_dim, bias=False).to(device)
 
     def init_one_svd(self, n_component, gridSize, scale, device):
