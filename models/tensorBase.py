@@ -78,22 +78,37 @@ class TensorBase(torch.nn.Module):
         from . import renderBase as Rndr
         print("pos_pe", pos_pe, "view_pe", view_pe, "fea_pe", fea_pe)
         ret = shadingMode
-        match shadingMode:
-            case Rndr.MLPRender_PE:
-                ret = shadingMode(self.app_dim, view_pe, pos_pe, featureC).to(self.device)
-            case Rndr.MLPRender_Fea:
-                ret = shadingMode(self.app_dim, view_pe, fea_pe, featureC).to(self.device)
-            case Rndr.MLPRender:
-                ret = shadingMode(self.app_dim, view_pe, featureC).to(self.device)
-            case Rndr.SHRender:
-                pass
-            case Rndr.RGBRender:
-                assert self.app_dim == 3
-            case _:
-                ret = partial(ret, self.app_dim, view_pe=view_pe, pos_pe=pos_pe, fea_pe=fea_pe, featureC=featureC)
-                if issubclass(shadingMode, Rndr.RenderBase | torch.nn.ModuleList):
-                    return ret(**kwargs).to(self.device)
-                raise ValueError("Unrecognized shading module")
+        # match shadingMode:
+        #     case Rndr.MLPRender_PE:
+        #         ret = shadingMode(self.app_dim, view_pe, pos_pe, featureC).to(self.device)
+        #     case Rndr.MLPRender_Fea:
+        #         ret = shadingMode(self.app_dim, view_pe, fea_pe, featureC).to(self.device)
+        #     case Rndr.MLPRender:
+        #         ret = shadingMode(self.app_dim, view_pe, featureC).to(self.device)
+        #     case Rndr.SHRender:
+        #         pass
+        #     case Rndr.RGBRender:
+        #         assert self.app_dim == 3
+        #     case _:
+        #         ret = partial(ret, self.app_dim, view_pe=view_pe, pos_pe=pos_pe, fea_pe=fea_pe, featureC=featureC)
+        #         if issubclass(shadingMode, Rndr.RenderBase | torch.nn.ModuleList):
+        #             return ret(**kwargs).to(self.device)
+        #         raise ValueError("Unrecognized shading module")
+        if shadingMode == Rndr.MLPRender_PE:
+            ret = shadingMode(self.app_dim, view_pe, pos_pe, featureC).to(self.device)
+        elif shadingMode == Rndr.MLPRender_Fea:
+            ret = shadingMode(self.app_dim, view_pe, fea_pe, featureC).to(self.device)
+        elif shadingMode == Rndr.MLPRender:
+            ret = shadingMode(self.app_dim, view_pe, featureC).to(self.device)
+        elif shadingMode == Rndr.SHRender:
+            pass
+        elif shadingMode == Rndr.RGBRender:
+            assert self.app_dim == 3
+        else:
+            ret = partial(ret, self.app_dim, view_pe=view_pe, pos_pe=pos_pe, fea_pe=fea_pe, featureC=featureC)
+            if issubclass(shadingMode, Rndr.RenderBase) or issubclass(shadingMode, torch.nn.ModuleList):
+                return ret(**kwargs).to(self.device)
+            raise ValueError("Unrecognized shading module")
         return ret
 
     def update_stepSize(self, gridSize):

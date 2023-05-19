@@ -8,7 +8,7 @@ from pytorch3d.ops import knn_points
 from scipy.spatial import ConvexHull, Delaunay
 from tqdm import tqdm
 
-from .palette.GteDistPointTriangle import DCPPointTriangle
+from .palette.Additive_mixing_layers_extraction import DCPPointTriangle
 
 
 def recon_with_palette(palette, points):

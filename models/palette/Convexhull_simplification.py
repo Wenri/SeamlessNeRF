@@ -59,7 +59,7 @@ def visualize_hull(hull, groundtruth_hull=None):
     plt.show()
 
 
-def write_convexhull_into_obj_file(hull, output_file: typing.Text | os.PathLike | typing.TextIO):
+def write_convexhull_into_obj_file(hull, output_file):
     hvertices = hull.points[hull.vertices]
     points_index = -1 * np.ones(hull.points.shape[0], dtype=np.int32)
     points_index[hull.vertices] = np.arange(len(hull.vertices))
@@ -78,7 +78,7 @@ def write_convexhull_into_obj_file(hull, output_file: typing.Text | os.PathLike 
         if np.dot(normals, n) < 0:
             hfaces[index][[1, 0]] = hfaces[index][[0, 1]]
 
-    with open(output_file, mode='w') if isinstance(output_file, str | os.PathLike) else nullcontext(
+    with open(output_file, mode='w') if (isinstance(output_file, str) or isinstance(output_file, os.PathLike)) else nullcontext(
             enter_result=output_file) as fp:
         for v in hvertices:
             print(f'v {v[0]} {v[1]} {v[2]}', file=fp)

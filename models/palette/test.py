@@ -45,7 +45,7 @@ def get_bigger_palette_to_show(palette):
     return palette2
 
 
-def main(filepath: str | os.PathLike[str]):
+def main(filepath):
     filepath = Path(filepath)
     img = np.asfarray(Image.open(filepath).convert('RGB')) / 255.0
     arr = img.copy()

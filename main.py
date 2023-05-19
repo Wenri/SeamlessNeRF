@@ -19,15 +19,23 @@ def config_parser(cmd=None):
 
 def command(args):
     print(args)
-    match args.command:
-        case 'train' | 'test':
-            import train
-            func = train.main
-        case 'merge':
-            import merge
-            func = merge.main
-        case _:
-            raise ValueError(f'Unknown command: {args.command}')
+    # match args.command:
+    #     case 'train' | 'test':
+    #         import train
+    #         func = train.main
+    #     case 'merge':
+    #         import merge
+    #         func = merge.main
+    #     case _:
+    #         raise ValueError(f'Unknown command: {args.command}')
+    if args.command == 'train' or args.command == 'test':
+        import train
+        func = train.main
+    elif args.command == 'merge':
+        import merge
+        func = merge.main
+    else:
+        raise ValueError(f'Unknown command: {args.command}')
     return func(args)
 
 
@@ -68,4 +76,5 @@ def setup_environment(cudaMallocAsync=True):
 
 
 if __name__ == "__main__":
-    setup_environment()(config_parser())
+    # setup_environment()(config_parser())
+    command(config_parser())

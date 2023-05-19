@@ -243,6 +243,6 @@ fabric.properties
 *.obj
 
 # Project Debug
-log/
+log*/
 ref/
 data/
