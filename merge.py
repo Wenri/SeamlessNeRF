@@ -2,6 +2,7 @@ import os
 import shutil
 from contextlib import suppress
 from itertools import repeat, chain, count
+from multiprocessing.pool import ThreadPool, Pool
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -21,7 +22,7 @@ from utils import convert_sdf_samples_to_ply
 
 
 class Merger(Evaluator):
-    def __init__(self, args):
+    def __init__(self, args, pool):
         self.args = args
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.target = self.build_network(self.args.ckpt)
@@ -32,7 +33,7 @@ class Merger(Evaluator):
                                 semantic_type=args.semantic_type)  # if not args.render_only else None
         test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_test, is_stack=True,
                                semantic_type=args.semantic_type, pca=getattr(train_dataset, 'pca', None))
-        super().__init__(self.build_network(), args, test_dataset, train_dataset)
+        super().__init__(self.build_network(), args, test_dataset, train_dataset, pool=pool)
         self.tensorf.args = self.args
         self.optimizer = None
 
@@ -283,7 +284,8 @@ class Merger(Evaluator):
         self.target.renderModule.ignore_control = False
         rgb[cur_mask] = self.tensorf.compute_radiance(xyz_sampled[cur_mask], cur_dirs[cur_mask])
         loss_dict = self.compute_diff_loss(sigma_feature, rgb, orig_rgb, bit_mask)
-        loss_total = sum(loss_dict.values())
+        loss_weight = {k: v for k in loss_dict.keys() if (v := getattr(self.args, k, None)) is not None}
+        loss_total = sum(v * loss_weight.get(k, 1) for k, v in loss_dict.items())
         self.optimizer.zero_grad()
         loss_total.backward()
         self.optimizer.step()
@@ -371,8 +373,12 @@ def config_parser(parser):
     parser.add_argument("--render_gap", type=float, help='render step size gap for target')
     parser.add_argument("--density_gain", type=float, default=1, help='density gain for source')
 
+    # loss weight
+    parser.add_argument("--loss_diff", type=float, help='weight for loss_diff')
+
 
 def main(args):
     assert args.render_only
-    merger = Merger(args)
-    merger.merge()
+    with ThreadPool() as pool:
+        merger = Merger(args, pool)
+        merger.merge()

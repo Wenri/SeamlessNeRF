@@ -1,3 +1,4 @@
+import operator
 from collections import namedtuple
 
 import imageio
@@ -30,13 +31,14 @@ def OctreeRender_trilinear_fast(rays, tensorf, chunk=4096, N_samples=-1, ndc_ray
     return OctreeRender_trilinear_fast_ret_t(rgbs=torch.cat(rgbs), depth_map=torch.cat(depth_maps))
 
 
-def visualize_rgb(depth_map, rgb_map, savePath, prtx):
+def visualize_rgb(depth_map, rgb_map, savePath, prtx, pool=None):
+    apply = operator.call if pool is None else pool.apply_async
     if savePath is None:
         return
     rgb_map = (rgb_map.numpy() * 255).astype('uint8')
-    imageio.imwrite(savePath / f'{prtx}.png', rgb_map)
+    apply(imageio.imwrite, savePath / f'{prtx}.png', rgb_map)
     rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
-    imageio.imwrite(savePath / 'rgbd' / f'{prtx}.png', rgb_map)
+    apply(imageio.imwrite, savePath / 'rgbd' / f'{prtx}.png', rgb_map)
 
 
 def visualize_palette(opaque, palette, savePath, prtx):

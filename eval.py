@@ -19,10 +19,11 @@ from utils import visualize_depth_numpy
 
 
 class Evaluator:
-    def __init__(self, tensorf, args, test_dataset, train_dataset=None, summary_writer=None):
+    def __init__(self, tensorf, args, test_dataset, train_dataset=None, summary_writer=None, pool=None):
         self.tensorf = tensorf
         self.renderer = OctreeRender_trilinear_fast
         self.args = args
+        self.pool = pool
         self.test_dataset = test_dataset
         self.alt_dataset = train_dataset
         self.summary_writer = summary_writer
@@ -77,7 +78,7 @@ class Evaluator:
         for rgb, plt, name in zip(
                 torch.tensor_split(plt_map.cpu(), self.n_palette, dim=-1), self.palette, self.plt_names):
             visualize_rgb(depth_map, rgb[..., :3].clamp(0.0, 1.0).reshape(H, W, 3), savePath,
-                          prtx=f'{prtx}{idx:03d}_{name}')
+                          prtx=f'{prtx}{idx:03d}_{name}', pool=self.pool)
             if plt is not None:
                 visualize_palette(rearrange(rgb[..., 3:], '(h w) c-> h w c', h=H, w=W), plt.T, savePath,
                                   prtx=f'{prtx}{idx:03d}_{name}')

@@ -13,4 +13,5 @@ export_mesh = 1
 render_test = 1
 
 model_name = ColorVMSplit
-density_gain = 0.1
+density_gain = 0.5
+loss_diff = 0.1
