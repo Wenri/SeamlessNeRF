@@ -47,6 +47,9 @@ class Evaluator:
                     save_GT=True):
         test_dataset = self.test_dataset
         tensorf = self.tensorf
+        kwargs = {}
+        if self.pool is not None:
+            kwargs['apply'] = self.pool.apply_async
 
         W, H = test_dataset.img_wh
         rays = samples.view(-1, samples.shape[-1])
@@ -78,7 +81,7 @@ class Evaluator:
         for rgb, plt, name in zip(
                 torch.tensor_split(plt_map.cpu(), self.n_palette, dim=-1), self.palette, self.plt_names):
             visualize_rgb(depth_map, rgb[..., :3].clamp(0.0, 1.0).reshape(H, W, 3), savePath,
-                          prtx=f'{prtx}{idx:03d}_{name}', pool=self.pool)
+                          prtx=f'{prtx}{idx:03d}_{name}', **kwargs)
             if plt is not None:
                 visualize_palette(rearrange(rgb[..., 3:], '(h w) c-> h w c', h=H, w=W), plt.T, savePath,
                                   prtx=f'{prtx}{idx:03d}_{name}')
