@@ -30,13 +30,13 @@ def OctreeRender_trilinear_fast(rays, tensorf, chunk=4096, N_samples=-1, ndc_ray
     return OctreeRender_trilinear_fast_ret_t(rgbs=torch.cat(rgbs), depth_map=torch.cat(depth_maps))
 
 
-def visualize_rgb(depth_map, rgb_map, savePath, prtx, apply=lambda f, *args, **kwargs: f(*args, **kwargs)):
+def visualize_rgb(depth_map, rgb_map, savePath, prtx, apply=lambda f, args: f(*args)):
     if savePath is None:
         return
     rgb_map = (rgb_map.numpy() * 255).astype('uint8')
-    apply(imageio.imwrite, savePath / f'{prtx}.png', rgb_map)
+    apply(imageio.imwrite, (savePath / f'{prtx}.png', rgb_map))
     rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
-    apply(imageio.imwrite, savePath / 'rgbd' / f'{prtx}.png', rgb_map)
+    apply(imageio.imwrite, (savePath / 'rgbd' / f'{prtx}.png', rgb_map))
 
 
 def visualize_palette(opaque, palette, savePath, prtx):

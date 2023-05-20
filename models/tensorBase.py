@@ -218,15 +218,16 @@ class TensorBase(torch.nn.Module):
         pass
 
     @torch.no_grad()
-    def getDenseAlpha(self, gridSize=None):
+    def getDenseAlpha(self, gridSize=None, aabb=None):
         gridSize = self.gridSize if gridSize is None else gridSize
+        aabb = self.aabb if aabb is None else aabb
 
         samples = torch.stack(torch.meshgrid(
             torch.linspace(0, 1, gridSize[0]),
             torch.linspace(0, 1, gridSize[1]),
             torch.linspace(0, 1, gridSize[2]),
         ), -1).to(self.device)
-        dense_xyz = self.aabb[0] * (1 - samples) + self.aabb[1] * samples
+        dense_xyz = aabb[0] * (1 - samples) + aabb[1] * samples
 
         # dense_xyz = dense_xyz
         # print(self.stepSize, self.distance_scale*self.aabbDiag)

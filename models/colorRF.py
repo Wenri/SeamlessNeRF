@@ -108,6 +108,11 @@ class ColorVMSplit(TensorVMSplit):
     def init_render_func(self, shadingMode, pos_pe=6, view_pe=6, fea_pe=6, featureC=128, *args, **kwargs):
         return super().init_render_func(shadingMode, pos_pe, view_pe, fea_pe, featureC, **kwargs)
 
+    def getDenseAlpha(self, gridSize=None, aabb=None):
+        if aabb is None:
+            aabb = getattr(self, 'merged_aabb', None)
+        return super().getDenseAlpha(gridSize, aabb)
+
     def add_merge_target(self, model, density_gain, render_gap=None):
         if isinstance(self.alphaMask, AlphaGridMask):
             self.alphaMask = MultipleGridMask(self.args.matrix, self.alphaMask)
@@ -123,7 +128,8 @@ class ColorVMSplit(TensorVMSplit):
             render_gap = self.stepSize / model.stepSize
         self.render_gap = render_gap
         self.density_gain = density_gain
-
+        # self.register_buffer(name='merged_aabb', persistent=False, tensor=torch.as_tensor(
+        #     (-1.5, -1.5, -1.5, 1.5, 1.5, 1.5), device=self.aabb.device, dtype=self.aabb.dtype).view(-1, 3))
         if isinstance(model, type(self)):
             self.merge_target.extend(model.merge_target)
             model = super(type(self), model)

@@ -64,7 +64,8 @@ class Merger(Evaluator):
             prefix = os.path.basename(args.ckpt)
         save_path = Path(args.basedir, args.expname, prefix).with_suffix('.ply')
         alpha, _ = tensorf.getDenseAlpha()
-        convert_sdf_samples_to_ply(alpha.cpu(), save_path, bbox=tensorf.aabb.cpu(), level=0.005)
+        bbox = getattr(tensorf, 'merged_aabb', tensorf.aabb)
+        convert_sdf_samples_to_ply(alpha.cpu(), save_path, bbox=bbox.cpu(), level=0.005)
 
     @torch.no_grad()
     def export_pointcloud(self, tensorf=None):
@@ -236,20 +237,21 @@ class Merger(Evaluator):
         diff = rgb[:, 0:1, :] - rgb[:, 1:, :]
         diff_ogt = orig_rgb[:, 0:1, :] - orig_rgb[:, 1:, :]
 
+        loss = {}
         valid = torch.zeros_like(mask)
         valid.masked_scatter_(mask, torch.logical_not(pts.get_index()))
         valid = torch.logical_and(valid[:, 0:1], valid[:, 1:])
-        loss_diff = torch.nn.functional.l1_loss(diff[valid], diff_ogt[valid], reduction='none')
+        if valid.any():
+            loss['loss_diff'] = torch.nn.functional.l1_loss(diff[valid], diff_ogt[valid], reduction='mean')
 
         valid = torch.zeros_like(mask)
         valid.masked_scatter_(mask, pts.get_index() > 0)
         valid = torch.logical_and(valid[:, 0], torch.bitwise_and(bit_mask[:, 0], 1))
+        if valid.any():
+            orig_rgb = torch.zeros_like(orig_rgb)
+            orig_rgb[mask] = self.tensorf.tgt_rgb
+            loss['loss_pin'] = torch.nn.functional.l1_loss(orig_rgb[valid, 0], rgb[valid, 0], reduction='mean')
 
-        orig_rgb = torch.zeros_like(orig_rgb)
-        orig_rgb[mask] = self.tensorf.tgt_rgb
-        loss_pin = torch.nn.functional.l1_loss(orig_rgb[valid, 0], rgb[valid, 0], reduction='none')
-
-        loss = {'loss_diff': loss_diff.mean(), 'loss_pin': loss_pin.mean()}
         return loss
 
     def compute_diff_loss2(self, sigma_feature: DensityFeature, rgb, orig_rgb, bit_mask):
