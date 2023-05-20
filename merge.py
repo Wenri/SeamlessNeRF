@@ -2,7 +2,7 @@ import os
 import shutil
 from contextlib import suppress
 from itertools import repeat, chain, count
-from multiprocessing.pool import ThreadPool, Pool
+from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -18,7 +18,7 @@ from trimesh import PointCloud
 from dataLoader import dataset_dict
 from eval import Evaluator
 from models.colorRF import DensityFeature
-from utils import convert_sdf_samples_to_ply
+from utils import convert_sdf_samples_to_ply, cal_n_samples
 
 
 class Merger(Evaluator):
@@ -98,18 +98,20 @@ class Merger(Evaluator):
         return app_mask, app_alpha
 
     @torch.no_grad()
-    def sample_filter_dataset(self, pts_path, chunk=64 * 1024):
+    def sample_filter_dataset(self, pts_path, chunk=8192):
         rays = torch.concat((self.alt_dataset.all_rays.view(-1, 6), self.test_dataset.all_rays.view(-1, 6)), dim=0)
         N_rays_all = rays.shape[0]
         cnt = count()
         aval_id = []
         aval_rep = []
         prefix = f'{Path(pts_path).stem}_'
+        nSamples = cal_n_samples(self.tensorf.gridSize.cpu().numpy(), self.tensorf.step_ratio)
+        nSamples = min(self.args.nSamples, nSamples / self.args.delta_scale)
         with TemporaryDirectory(dir=os.path.dirname(pts_path)) as tmpdir:
             for chunk_idx in trange(N_rays_all // chunk + int(N_rays_all % chunk > 0), desc='sample_filter_dataset'):
                 rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk].to(self.device)
                 xyz_sampled, z_vals, dists, viewdirs, ray_valid = self.tensorf.sample_and_filter_rays(
-                    rays_chunk, is_train=False, ndc_ray=self.args.ndc_ray, N_samples=512)
+                    rays_chunk, is_train=False, ndc_ray=self.args.ndc_ray, N_samples=nSamples)
                 app_mask, app_alpha = self.filter_pts(xyz_sampled, dists, ray_valid)
                 if app_mask.any():
                     np.save(os.path.join(tmpdir, f'{prefix}{next(cnt)}.npy'),
@@ -147,9 +149,10 @@ class Merger(Evaluator):
             parent.mkdir(exist_ok=True)
 
         self.logger.warn('Generating all_query_pts using CUDA...')
-        dx = torch.tensor((self.tensorf.stepSize, 0., 0.), device=self.device)
-        dy = torch.tensor((0., self.tensorf.stepSize, 0.), device=self.device)
-        dz = torch.tensor((0., 0., self.tensorf.stepSize), device=self.device)
+        delta = self.tensorf.stepSize * self.args.delta_scale
+        dx = torch.tensor((delta, 0., 0.), device=self.device)
+        dy = torch.tensor((0., delta, 0.), device=self.device)
+        dz = torch.tensor((0., 0., delta), device=self.device)
         pts_diff = torch.stack((pts + dx, pts + dy, pts + dz, pts - dx, pts - dy, pts - dz), dim=1)
         all_query_pts = torch.concat((pts.unsqueeze(dim=1), pts_diff), dim=1).view(-1, 3)
         np.save(pts_path, all_query_pts.cpu().numpy())
@@ -335,7 +338,8 @@ class Merger(Evaluator):
             self.export_mesh()
         pts = self.export_pointcloud()
         pts, mask, dists = self.generate_grad(pts)
-        self.render_test()
+        if self.args.export_mesh:
+            self.render_test()
         self.poisson_editing(pts, mask, dists)
 
 
@@ -374,6 +378,8 @@ def config_parser(parser):
     # logging/saving options
     parser.add_argument("--render_gap", type=float, help='render step size gap for target')
     parser.add_argument("--density_gain", type=float, default=1, help='density gain for source')
+    parser.add_argument("--delta_scale", type=float, default=1, help='weight for loss_diff')
+    parser.add_argument('--nSamples', type=int, default=1e6, help='sample point each ray, pass 1e6 if automatic adjust')
 
     # loss weight
     parser.add_argument("--loss_diff", type=float, help='weight for loss_diff')
