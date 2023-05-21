@@ -288,7 +288,7 @@ class Merger(Evaluator):
 
         self.target.renderModule.ignore_control = False
         rgb[cur_mask] = self.tensorf.compute_radiance(xyz_sampled[cur_mask], cur_dirs[cur_mask])
-        loss_dict = self.compute_diff_loss2(sigma_feature, rgb, orig_rgb, bit_mask)
+        loss_dict = self.compute_diff_loss(sigma_feature, rgb, orig_rgb, bit_mask)
         loss_weight = {k: v for k in loss_dict.keys() if (v := getattr(self.args, k, None)) is not None}
         loss_total = sum(v * loss_weight.get(k, 1) for k, v in loss_dict.items())
         self.optimizer.zero_grad()

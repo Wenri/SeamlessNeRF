@@ -1,0 +1,20 @@
+dataset_name = blender
+datadir = data/seamless/bulbasaur
+expname = merge_bird_statue_over_bulbasaur
+basedir = ./log
+ckpt = ./log/merge_bird_statue_over_bulbasaur/bird_statue_tensorfvm.th
+N_vis = 5
+
+matrix = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+# matrix = [1.0669995546340942, 0.0, 0.0, 0.008616231381893158, 0.0, 1.0669995546340942, 0.0, -0.015135876834392548, 0.0, 0.0, 1.0669995546340942, -0.035136133432388306, 0.0, 0.0, 0.0, 1.0]
+
+render_only = 1
+export_mesh = 1
+render_test = 1
+
+model_name = ColorVMSplit
+density_gain = 0.5
+loss_diff = 0.1
+delta_scale = 0.2
+nSamples = 50000
+batch_size = 16384
