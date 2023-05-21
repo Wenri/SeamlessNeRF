@@ -1,5 +1,5 @@
 dataset_name = blender
-datadir = /research/d1/gds/yhwang21/datasets/seamless_nerf_datasets/batman_wings/
+datadir = data/seamless/batman_wings/
 expname = batman_wings_tensorfvm
 basedir = ./logs
 
@@ -32,7 +32,7 @@ fea_pe = 2
 L1_weight_inital = 8e-5
 L1_weight_rest = 4e-5
 rm_weight_mask_thre = 1e-4
-init_density_scale = 1.0
+init_density_scale = 0.4
 
 ## please uncomment following configuration if hope to training on cp model
 #model_name = TensorCP

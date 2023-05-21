@@ -1,5 +1,5 @@
 dataset_name = blender
-datadir = /research/d1/gds/yhwang21/datasets/seamless_nerf_datasets/bulbasaur/
+datadir = data/seamless/bulbasaur/
 expname = bulbasaur_tensorfvm
 basedir = ./logs
 
@@ -10,6 +10,7 @@ N_voxel_init = 2097156 # 128**3
 N_voxel_final = 27000000 # 300**3
 upsamp_list = [2000,3000,4000,5500,7000]
 update_AlphaMask_list = [2000,4000]
+at_least_aabb = [-1.1020, -1.0075, -0.7548, 0.7813, 1.0075, 0.6496]
 step_ratio = 0.5
 
 N_vis = 5
@@ -32,7 +33,7 @@ fea_pe = 2
 L1_weight_inital = 8e-5
 L1_weight_rest = 4e-5
 rm_weight_mask_thre = 1e-4
-init_density_scale = 1.0
+#init_density_scale = 1.0
 
 ## please uncomment following configuration if hope to training on cp model
 #model_name = TensorCP
