@@ -170,7 +170,7 @@ class Merger(Evaluator):
                 return aval_pts, aval_id, aval_rep
 
         self.logger.warn('Calc aval_pts using CUDA...')
-        aval_pts, aval_id, aval_rep = self.sample_filter_dataset(pts_path)
+        aval_pts, aval_id, aval_rep = self.sample_filter_dataset(pts_path, self.args.batch_size)
         np.save(pts_path.with_stem('aval_id'), aval_id.numpy())
         np.save(pts_path.with_stem('aval_rep'), aval_rep.numpy())
         return aval_pts, aval_id, aval_rep
@@ -288,7 +288,7 @@ class Merger(Evaluator):
 
         self.target.renderModule.ignore_control = False
         rgb[cur_mask] = self.tensorf.compute_radiance(xyz_sampled[cur_mask], cur_dirs[cur_mask])
-        loss_dict = self.compute_diff_loss(sigma_feature, rgb, orig_rgb, bit_mask)
+        loss_dict = self.compute_diff_loss2(sigma_feature, rgb, orig_rgb, bit_mask)
         loss_weight = {k: v for k in loss_dict.keys() if (v := getattr(self.args, k, None)) is not None}
         loss_total = sum(v * loss_weight.get(k, 1) for k, v in loss_dict.items())
         self.optimizer.zero_grad()
@@ -355,6 +355,7 @@ def config_parser(parser):
     parser.add_argument('--downsample_test', type=float, default=1.0)
     parser.add_argument('--matrix', type=float, nargs='+', default=())
     parser.add_argument("--lr_basis", type=float, default=1e-3, help='learning rate')
+    parser.add_argument("--batch_size", type=int, default=8192)
 
     parser.add_argument('--model_name', type=MODEL_ZOO.get, default='TensorVMSplit', choices=MODEL_ZOO)
     parser.add_argument('--dataset_name', type=str, default='blender', choices=dataset_dict.keys())

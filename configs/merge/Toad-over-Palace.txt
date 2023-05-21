@@ -12,5 +12,6 @@ render_only = 1
 render_test = 1
 
 model_name = ColorVMSplit
-
+batch_size = 131072
+loss_diff = 0.0001
 #####
