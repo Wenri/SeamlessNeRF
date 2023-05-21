@@ -75,7 +75,8 @@ class Merger(Evaluator):
             save_path = save_path / args.expname
         else:
             save_path = save_path / os.path.basename(args.ckpt)
-        save_path = save_path.with_stem(save_path.stem + '_pc').with_suffix('.ply')
+        # save_path = save_path.with_stem(save_path.stem + '_pc').with_suffix('.ply')
+        save_path = save_path.with_name(save_path.stem + '_pc.ply')
         alpha, xyz = tensorf.getDenseAlpha()
         pts = xyz[alpha > 0.005]
         pc = PointCloud(pts.cpu().numpy())
@@ -156,29 +157,37 @@ class Merger(Evaluator):
 
     @torch.no_grad()
     def load_aval_pts(self, pts_path: Path):
-        pts_path = pts_path.with_stem('aval_pts')
+        # pts_path = pts_path.with_stem('aval_pts')
+        pts_path = pts_path.with_name('aval_pts.npy')
         if pts_path.exists():
             self.logger.info('Loading aval_pts from cached...')
             with suppress(Exception):
                 aval_pts = torch.from_numpy(open_memmap(pts_path, mode='r'))
-                aval_id = torch.from_numpy(open_memmap(pts_path.with_stem('aval_id'), mode='r'))
-                aval_rep = torch.from_numpy(open_memmap(pts_path.with_stem('aval_rep'), mode='r'))
+                # aval_id = torch.from_numpy(open_memmap(pts_path.with_stem('aval_id'), mode='r'))
+                # aval_rep = torch.from_numpy(open_memmap(pts_path.with_stem('aval_rep'), mode='r'))
+                aval_id = torch.from_numpy(open_memmap(pts_path.with_name('aval_id.npy'), mode='r'))
+                aval_rep = torch.from_numpy(open_memmap(pts_path.with_name('aval_rep.npy'), mode='r'))
                 return aval_pts, aval_id, aval_rep
 
         self.logger.warn('Calc aval_pts using CUDA...')
         aval_pts, aval_id, aval_rep = self.sample_filter_dataset(pts_path)
-        np.save(pts_path.with_stem('aval_id'), aval_id.numpy())
-        np.save(pts_path.with_stem('aval_rep'), aval_rep.numpy())
+        # np.save(pts_path.with_stem('aval_id'), aval_id.numpy())
+        # np.save(pts_path.with_stem('aval_rep'), aval_rep.numpy())
+        np.save(pts_path.with_name('aval_id.npy'), aval_id.numpy())
+        np.save(pts_path.with_name('aval_rep.npy'), aval_rep.numpy())
         return aval_pts, aval_id, aval_rep
 
     @torch.no_grad()
     def load_ball_pts(self, ptsPath: Path, pts, all_query_pts, aval_rep):
-        ptsPath = ptsPath.with_stem('ball_dists')
+        # ptsPath = ptsPath.with_stem('ball_dists')
+        ptsPath = ptsPath.with_name('ball_dists.npy')
         if ptsPath.exists():
             self.logger.info('Loading ball_pts from cached...')
             ball_dists = torch.from_numpy(open_memmap(ptsPath, mode='r'))
-            ball_idx = torch.from_numpy(open_memmap(ptsPath.with_stem('ball_idx'), mode='r'))
-            ball_knn = torch.from_numpy(open_memmap(ptsPath.with_stem('ball_knn'), mode='r'))
+            # ball_idx = torch.from_numpy(open_memmap(ptsPath.with_stem('ball_idx'), mode='r'))
+            # ball_knn = torch.from_numpy(open_memmap(ptsPath.with_stem('ball_knn'), mode='r'))
+            ball_idx = torch.from_numpy(open_memmap(ptsPath.with_name('ball_idx.npy'), mode='r'))
+            ball_knn = torch.from_numpy(open_memmap(ptsPath.with_name('ball_knn.npy'), mode='r'))
         else:
             self.logger.warn('Calc ball_pts using CUDA...')
             aval_rep_pts = aval_rep[None, ..., :3].cuda()
@@ -189,25 +198,30 @@ class Merger(Evaluator):
             self.logger.warn('Using Mdn = %f', mdn)
             ball_dists, ball_idx, ball_knn = ball_query(all_query_pts[None].cuda(), aval_rep_pts, K=10, radius=mdn)
             np.save(ptsPath, (ball_dists := ball_dists.cpu()).numpy())
-            np.save(ptsPath.with_stem('ball_idx'), (ball_idx := ball_idx.cpu()).numpy())
-            np.save(ptsPath.with_stem('ball_knn'), (ball_knn := ball_knn.cpu()).numpy())
+            # np.save(ptsPath.with_stem('ball_idx'), (ball_idx := ball_idx.cpu()).numpy())
+            # np.save(ptsPath.with_stem('ball_knn'), (ball_knn := ball_knn.cpu()).numpy())
+            np.save(ptsPath.with_name('ball_idx.npy'), (ball_idx := ball_idx.cpu()).numpy())
+            np.save(ptsPath.with_name('ball_knn.npy'), (ball_knn := ball_knn.cpu()).numpy())
 
         ball_dists = rearrange(ball_dists, '1 (n d) k -> n d k', n=pts.shape[0])
         return ball_dists, ball_idx.view(*ball_dists.shape), ball_knn.view(*ball_dists.shape, 3)
 
     @torch.no_grad()
     def load_knn_pts(self, pts_path: Path, pts, aval_rep):
-        pts_path = pts_path.with_stem('knn_dists')
+        # pts_path = pts_path.with_stem('knn_dists')
+        pts_path = pts_path.with_name('knn_dists.npy')
         if pts_path.exists():
             self.logger.info('Loading knn_pts from cached...')
             knn_dists = torch.from_numpy(open_memmap(pts_path, mode='r'))
-            knn_idx = torch.from_numpy(open_memmap(pts_path.with_stem('knn_idx'), mode='r'))
+            # knn_idx = torch.from_numpy(open_memmap(pts_path.with_stem('knn_idx'), mode='r'))
+            knn_idx = torch.from_numpy(open_memmap(pts_path.with_name('knn_idx.npy'), mode='r'))
         else:
             self.logger.warn('Calc knn_pts using CUDA...')
             knn_dists, knn_idx, _ = knn_points(pts[None].cuda(), aval_rep[None, ..., :3].cuda(), K=100,
                                                return_sorted=True)
             np.save(pts_path, (knn_dists := knn_dists.cpu()).numpy())
-            np.save(pts_path.with_stem('knn_idx'), (knn_idx := knn_idx.cpu()).numpy())
+            # np.save(pts_path.with_stem('knn_idx'), (knn_idx := knn_idx.cpu()).numpy())
+            np.save(pts_path.with_name('knn_idx.npy'), (knn_idx := knn_idx.cpu()).numpy())
         return knn_dists.squeeze(0), knn_idx.squeeze(0)
 
     @torch.no_grad()
@@ -379,6 +393,8 @@ def config_parser(parser):
 
 def main(args):
     assert args.render_only
-    with ThreadPool() as pool:
-        merger = Merger(args, pool)
-        merger.merge()
+    # with ThreadPool() as pool:
+    #     merger = Merger(args, pool)
+    #     merger.merge()
+    merger = Merger(args, None)
+    merger.merge()

@@ -1,8 +1,8 @@
 dataset_name = blender
-datadir = /research/d1/gds/yhwang21/datasets/seamless_nerf_datasets/female_sculpture/
-expname = merge_arm_over_female_sculpture
+datadir = /research/d1/gds/yhwang21/datasets/seamless_nerf_datasets/bird_statue/
+expname = merge_bulbasaur_over_bird_statue
 basedir = ./logs
-ckpt = ./logs/merge_arm_over_female_sculpture/female_sculpture_arms_tensorfvm.th
+ckpt = ./logs/merge_bulbasaur_over_bird_statue/bird_statue_tensorfvm.th
 N_vis = 5
 
 matrix = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]

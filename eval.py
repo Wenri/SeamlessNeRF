@@ -44,7 +44,7 @@ class Evaluator:
         self.logger = logging.getLogger(type(self).__name__)
 
     def eval_sample(self, idx, samples, savePath: Path, prtx='', N_samples=-1, white_bg=False, ndc_ray=False,
-                    save_GT=True):
+                    save_GT=False):
         test_dataset = self.test_dataset
         tensorf = self.tensorf
         kwargs = {}
@@ -108,7 +108,7 @@ class Evaluator:
             self.eval_sample(idxs[idx], samples, savePath, prtx, N_samples, white_bg, ndc_ray)
             torch.cuda.empty_cache()
 
-        self.save_video_mean(savePath, prtx)
+        self.save_video_mean(savePath, prtx, no_video=(N_vis >= 0))
 
         return self.PSNRs
 
@@ -173,18 +173,19 @@ class Evaluator:
 
         return ret
 
-    def save_video_mean(self, savePath: os.PathLike, prtx=''):
+    def save_video_mean(self, savePath: os.PathLike, prtx='', no_video=False, no_metric=False):
         savePath = Path(savePath)
 
-        kwargs = {
-            'fps': min(len(self.rgb_maps) / 5, 30),
-            'quality': 10,
-            'macro_block_size': 8,
-        }
-        imageio.mimwrite(savePath / f'{prtx}video.mp4', self.rgb_maps, **kwargs)
-        imageio.mimwrite(savePath / f'{prtx}depthvideo.mp4', self.depth_maps, **kwargs)
+        if not no_video:
+            kwargs = {
+                'fps': min(len(self.rgb_maps) / 5, 30),
+                'quality': 10,
+                'macro_block_size': 8,
+            }
+            imageio.mimwrite(savePath / f'{prtx}video.mp4', self.rgb_maps, **kwargs)
+            imageio.mimwrite(savePath / f'{prtx}depthvideo.mp4', self.depth_maps, **kwargs)
 
-        if self.PSNRs:
+        if self.PSNRs and not no_metric:
             psnr = np.mean(np.asarray(self.PSNRs))
             if self.compute_extra_metrics:
                 ssim = np.mean(np.asarray(self.ssims))

@@ -1,6 +1,6 @@
 dataset_name = blender
-datadir = /research/d1/gds/yhwang21/datasets/seamless_nerf_datasets/female_sculpture/
-expname = female_sculpture_tensorfvm
+datadir = /research/d1/gds/yhwang21/datasets/seamless_nerf_datasets/bird_statue/
+expname = bird_statue_tensorfvm
 basedir = ./logs
 
 n_iters = 30000
