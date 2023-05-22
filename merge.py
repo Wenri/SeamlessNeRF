@@ -22,6 +22,12 @@ from models.colorRF import DensityFeature
 from utils import convert_sdf_samples_to_ply
 
 
+def has_trainable_control(ckpt):
+    for k in ckpt['state_dict']:
+        if k.find('app_plane_ctl') >= 0 or k.find('app_line_ctl') >= 0 or k.find('mlp_control') >= 0:
+            return True
+    return False
+
 class Merger(Evaluator):
     def __init__(self, args, pool):
         self.args = args
@@ -48,10 +54,15 @@ class Merger(Evaluator):
             raise RuntimeError(f'the ckpt {ckpt} does not exists!!')
 
         ckpt = torch.load(ckpt, map_location=self.device)
+        # ckpt = torch.load(ckpt)
         kwargs = ckpt['kwargs']
         kwargs.update({'device': self.device})
         tensorf = args.model_name(**kwargs)
+        if has_trainable_control(ckpt):
+            tensorf.renderModule.enable_trainable_control()
+            tensorf.enable_trainable_control()
         tensorf.load(ckpt)
+        # tensorf.to(self.device)
 
         return tensorf
 
@@ -146,7 +157,7 @@ class Merger(Evaluator):
             self.logger.info('Loading all_query_pts from cached into GPU...')
             with suppress(Exception):
                 all_query_pts = torch.from_numpy(open_memmap(pts_path, mode='r')).to(self.device)
-                if torch.allclose(pts, all_query_pts.view(-1, 7, 3)[:, 0]):
+                if torch.allclose(pts, all_query_pts.view(-1, 7, 3)[:, 0], atol=1e-6):
                     return all_query_pts
             self.logger.warn('Cached query_pts mismatch. Regenerating...')
             parent = pts_path.parent
