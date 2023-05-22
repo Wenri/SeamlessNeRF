@@ -1,5 +1,6 @@
 import os
 import shutil
+import datetime
 from contextlib import suppress
 from itertools import repeat, chain, count
 from multiprocessing.pool import ThreadPool, Pool
@@ -36,6 +37,7 @@ class Merger(Evaluator):
         super().__init__(self.build_network(), args, test_dataset, train_dataset, pool=pool)
         self.tensorf.args = self.args
         self.optimizer = None
+        self.compute_psnr = False
 
     def build_network(self, ckpt=None):
         args = self.args
@@ -67,14 +69,19 @@ class Merger(Evaluator):
         convert_sdf_samples_to_ply(alpha.cpu(), save_path, bbox=tensorf.aabb.cpu(), level=0.005)
 
     @torch.no_grad()
-    def export_pointcloud(self, tensorf=None):
+    def export_pointcloud(self, tensorf=None, prefix=None):
         args = self.args
+        if not prefix:
+            prefix = args.expname
         save_path = Path(args.basedir, args.expname)
         if tensorf is None:
             tensorf = self.tensorf
-            save_path = save_path / args.expname
+            save_path = save_path / prefix
         else:
-            save_path = save_path / os.path.basename(args.ckpt)
+            if not prefix:
+                save_path = save_path / os.path.basename(args.ckpt)
+            else:
+                save_path = save_path / prefix
         # save_path = save_path.with_stem(save_path.stem + '_pc').with_suffix('.ply')
         save_path = save_path.with_name(save_path.stem + '_pc.ply')
         alpha, xyz = tensorf.getDenseAlpha()
@@ -322,6 +329,7 @@ class Merger(Evaluator):
         save_path.mkdir(exist_ok=True)
         (save_path / 'rgbd').mkdir(exist_ok=True)
 
+
         batch_counter = count()
         for cur_pts, cur_mask, cur_dist in pbar:
             loss_dict = self.train_one_batch(cur_mask, cur_pts)
@@ -334,21 +342,52 @@ class Merger(Evaluator):
                 self.eval_sample(test_idx, self.test_dataset.all_rays[test_idx], save_path, f'it{cur_idx:06d}_',
                                  N_samples=-1, white_bg=self.test_dataset.white_bg, save_GT=False)
 
+            if cur_idx >= args.ft_iters:
+                break
+
         return loss
 
     def merge(self):
         if self.args.export_mesh:
-            self.export_mesh(prefix=os.path.basename(self.args.datadir))
+            # self.export_mesh(prefix=os.path.basename(self.args.datadir))
+            self.export_mesh(prefix='source')
         self.target.renderModule.enable_trainable_control()
         self.target.enable_trainable_control()
         self.tensorf.add_merge_target(self.target, self.args.density_gain, self.args.render_gap)
         if self.args.export_mesh:
-            self.export_mesh(self.target)
-            self.export_mesh()
-        pts = self.export_pointcloud()
+            self.export_mesh(self.target, 'target')
+            self.export_mesh(prefix='merged')
+        pts = self.export_pointcloud(prefix='merged')
         pts, mask, dists = self.generate_grad(pts)
-        self.render_test()
-        self.poisson_editing(pts, mask, dists)
+
+        if not os.path.exists(os.path.join(self.args.basedir, self.args.expname, 'imgs_test_all_nope')):
+            self.render_test(prefix='imgs_test_all_nope')
+
+        if not self.args.merge_render_only:
+            self.poisson_editing(pts, mask, dists)
+
+            ckpt_savepath = os.path.join(self.args.basedir, self.args.expname, f'{Path(self.args.ckpt).stem}_ft.th')
+            self.target.save(ckpt_savepath)
+
+        self.render_test(prefix='imgs_test_all_pe')
+
+    @torch.no_grad()
+    def render_test(self, prefix='imgs_test_all'):
+        args = self.args
+        white_bg = self.test_dataset.white_bg
+        ndc_ray = args.ndc_ray
+
+        if self.summary_writer is not None:
+            logfolder = Path(self.summary_writer.log_dir)
+        else:
+            logfolder = Path(getattr(args, 'basedir', os.path.dirname(args.ckpt)), args.expname)
+            if getattr(args, 'add_timestamp', None):
+                logfolder = logfolder / datetime.now().strftime("-%Y%m%d-%H%M%S")
+
+        if args.render_test:
+            filePath = logfolder / prefix
+            self.evaluation(os.fspath(filePath), N_vis=-1, N_samples=-1, white_bg=white_bg, ndc_ray=ndc_ray)
+        return None 
 
 
 def config_parser(parser):
@@ -377,6 +416,8 @@ def config_parser(parser):
     parser.add_argument("--render_path", action="store_true")
     parser.add_argument("--export_mesh", action="store_true")
 
+    parser.add_argument("--merge_render_only", action="store_true")
+
     # rendering options
     parser.add_argument('--ndc_ray', type=int, default=0)
 
@@ -389,6 +430,8 @@ def config_parser(parser):
 
     # loss weight
     parser.add_argument("--loss_diff", type=float, help='weight for loss_diff')
+
+    parser.add_argument("--ft_iters", type=int, default=300, help='# of finetune iterations')
 
 
 def main(args):

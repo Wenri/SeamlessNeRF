@@ -28,6 +28,7 @@ class Evaluator:
         self.alt_dataset = train_dataset
         self.summary_writer = summary_writer
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.compute_psnr = True
         self.compute_extra_metrics = False
 
         self.n_palette = getattr(tensorf.renderModule, 'n_palette', 1)
@@ -64,7 +65,8 @@ class Evaluator:
             if save_GT:
                 gt_vis.append(gt_rgb)
             loss = torch.mean((rgb_map - gt_rgb) ** 2)
-            self.PSNRs.append(-10.0 * np.log(loss.item()) / np.log(10.0))
+            if self.compute_psnr:
+                self.PSNRs.append(-10.0 * np.log(loss.item()) / np.log(10.0))
             self.compute_metrics(gt_rgb, rgb_map)
 
         if save_GT and len(getattr(test_dataset, 'all_sems', ())):
