@@ -1,0 +1,18 @@
+dataset_name = blender
+datadir = data/gbcseldb/stanford_dragon/
+expname = merge_astromech_over_dragon
+basedir = ./log
+ckpt = ./log/merge_astromech_over_dragon/astromech_tensorfvm.th
+N_vis = 5
+
+matrix = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+
+render_only = 1
+export_mesh = 1
+render_test = 1
+
+model_name = ColorVMSplit
+density_gain = 2
+loss_diff = 0.5
+delta_scale = 0.1
+nSamples = 30000

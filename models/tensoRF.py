@@ -240,7 +240,7 @@ class TensorVMSplit(TensorBase):
         return sigma_feature
 
     def get_appparam(self):
-        return self.app_plane, self.app_line
+        return self.app_plane, self.app_line, self.basis_mat
 
     def compute_appfeature(self, xyz_sampled):
 
@@ -253,7 +253,7 @@ class TensorVMSplit(TensorBase):
                                                                                                                   1, 2)
 
         plane_coef_point, line_coef_point = [], []
-        app_plane, app_line = self.get_appparam()
+        app_plane, app_line, basis_mat = self.get_appparam()
         for idx_plane in range(len(app_plane)):
             plane_coef_point.append(F.grid_sample(app_plane[idx_plane], coordinate_plane[[idx_plane]],
                                                   align_corners=True).view(-1, *xyz_sampled.shape[:1]))
@@ -261,7 +261,7 @@ class TensorVMSplit(TensorBase):
                                                  align_corners=True).view(-1, *xyz_sampled.shape[:1]))
         plane_coef_point, line_coef_point = torch.cat(plane_coef_point), torch.cat(line_coef_point)
 
-        return self.basis_mat((plane_coef_point * line_coef_point).T)
+        return basis_mat((plane_coef_point * line_coef_point).T)
 
     @torch.no_grad()
     def up_sampling_VM(self, plane_coef, line_coef, res_target):

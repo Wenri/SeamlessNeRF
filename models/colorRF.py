@@ -146,7 +146,7 @@ class ColorVMSplit(TensorVMSplit):
     def get_appparam(self):
         if self.renderModule.ignore_control or not hasattr(self, 'app_plane_ctl'):
             return super().get_appparam()
-        return self.app_plane_ctl, self.app_line_ctl
+        return self.app_plane_ctl, self.app_line_ctl, self.basis_mat_ctl
 
     def compute_validmask(self, xyz_sampled: torch.Tensor, bitmap=False):
         ray_valid = super().compute_validmask(xyz_sampled).int()
@@ -206,6 +206,7 @@ class ColorVMSplit(TensorVMSplit):
     def enable_trainable_control(self):
         self.add_module('app_plane_ctl', torch_copy(self.app_plane))
         self.add_module('app_line_ctl', torch_copy(self.app_line))
+        self.add_module('basis_mat_ctl', torch_copy(self.basis_mat))
 
     def update_stepSize(self, gridSize):
         ret = super().update_stepSize(gridSize)

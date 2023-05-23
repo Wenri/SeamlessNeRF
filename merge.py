@@ -77,7 +77,8 @@ class Merger(Evaluator):
         else:
             save_path = save_path / os.path.basename(args.ckpt)
         save_path = save_path.with_stem(save_path.stem + '_pc').with_suffix('.ply')
-        alpha, xyz = tensorf.getDenseAlpha()
+        gridSize = tensorf.gridSize * 2
+        alpha, xyz = tensorf.getDenseAlpha(gridSize)
         pts = xyz[alpha > 0.005]
         pc = PointCloud(pts.cpu().numpy())
         pc.export(save_path)
@@ -305,9 +306,10 @@ class Merger(Evaluator):
         loss = None
 
         grad_vars = chain(
-            self.target.renderModule.mlp_control.parameters(),
+            self.target.basis_mat_ctl.parameters(),
             self.target.app_plane_ctl.parameters(),
-            self.target.app_line_ctl.parameters()
+            self.target.app_line_ctl.parameters(),
+            self.target.renderModule.mlp_control.parameters(),
         )
         self.optimizer = torch.optim.Adam(grad_vars, lr=args.lr_basis, betas=(0.9, 0.99))
         save_path.mkdir(exist_ok=True)
