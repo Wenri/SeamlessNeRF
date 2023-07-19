@@ -182,6 +182,9 @@ class ColorVMSplit(TensorVMSplit):
         if len(self.merge_target) == 0:
             return rgb
 
+        shift_and_scale = getattr(self.alphaMask, 'shift_and_scale', torch.nn.Identity())
+        viewdirs = shift_and_scale(viewdirs) - shift_and_scale(torch.zeros(3, device=viewdirs.device))
+        viewdirs = viewdirs / torch.norm(viewdirs, dim=-1, keepdim=True)
         tgt, = [model.compute_radiance(pts.adj_coord(partial(
             self.adjust_coord, func=model.normalize_coord)).get_array(), viewdirs) for model in self.merge_target]
         idx = pts.get_index()

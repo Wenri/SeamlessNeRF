@@ -77,7 +77,7 @@ class Merger(Evaluator):
         else:
             save_path = save_path / os.path.basename(args.ckpt)
         save_path = save_path.with_stem(save_path.stem + '_pc').with_suffix('.ply')
-        gridSize = tensorf.gridSize * 2
+        gridSize = tensorf.gridSize   # * 2
         alpha, xyz = tensorf.getDenseAlpha(gridSize)
         pts = xyz[alpha > 0.005]
         pc = PointCloud(pts.cpu().numpy())
