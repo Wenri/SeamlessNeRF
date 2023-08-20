@@ -5,6 +5,8 @@ from functools import partial
 from itertools import zip_longest
 
 import torch
+from numpy.lib.format import open_memmap
+from pytorch3d.ops import knn_points
 from torch import nn
 
 from .renderBase import MLPRender_Fea
@@ -230,8 +232,17 @@ class PoissonMLPRender(MLPRender_Fea):
         super().__init__(inChanel, viewpe, feape, featureC)
         self.orig_rgb = None
         self.ignore_control = False
+        self.rand_viewdir = False
+        pts_path = '/media/gbcdisk/project/SA2023/SubmitLog_20230720/merge_Toad_over_Palace/cache/aval_rep.npy'
+        aval_rep = torch.from_numpy(open_memmap(pts_path, mode='r'))
+        self.register_buffer('aval_rep', aval_rep, persistent=False)
 
     def forward(self, pts, viewdirs, features):
+        if self.rand_viewdir:
+            viewdirs = torch.nn.functional.normalize(torch.rand_like(viewdirs))
+        elif hasattr(self, 'aval_rep'):
+            viewdirs = knn_points(viewdirs[None].cuda(), self.aval_rep[None, ..., 3:],
+                                  K=1, return_sorted=False, return_nn=True).knn.view_as(viewdirs)
         add_control = hasattr(self, 'mlp_control') and not self.ignore_control
         self.orig_rgb = None
         with self.mlp.register_forward_hook(self.mlp_forward_hook) if add_control else nullcontext():
