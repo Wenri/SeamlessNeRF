@@ -163,6 +163,10 @@ class Merger(Evaluator):
     def tensorf(self):
         return self.render_viewpoints_kwargs['model']
 
+    @property
+    def target(self):
+        return self.tensorf.target
+
     @torch.no_grad()
     def export_mesh(self, tensorf=None, prefix=None):
         args = self.args
@@ -260,21 +264,20 @@ class Merger(Evaluator):
         all_query_pts = torch.cat((all_query_pts, pts_viewdir), dim=-1)
         return all_query_pts, mask, dists.view(*mask.shape).cpu()
 
-    def compute_diff_loss(self, sigma_feature: DensityFeature, rgb, orig_rgb, bit_mask):
-        pts = sigma_feature.pts
-        mask = pts.valid_mask
+    def compute_diff_loss(self, mask, rgb, orig_rgb, bit_mask):
+        idx = self.tensorf.idx
         diff = rgb[:, 0:1, :] - rgb[:, 1:, :]
         diff_ogt = orig_rgb[:, 0:1, :] - orig_rgb[:, 1:, :]
 
         loss = {}
         valid = torch.zeros_like(mask)
-        valid.masked_scatter_(mask, torch.logical_not(pts.get_index()))
+        valid.masked_scatter_(mask, torch.logical_not(idx))
         valid = torch.logical_and(valid[:, 0:1], valid[:, 1:])
         if valid.any():
             loss['loss_diff'] = torch.nn.functional.l1_loss(diff[valid], diff_ogt[valid], reduction='mean')
 
         valid = torch.zeros_like(mask)
-        valid.masked_scatter_(mask, pts.get_index() > 0)
+        valid.masked_scatter_(mask, idx > 0)
         valid = torch.logical_and(valid[:, 0], torch.bitwise_and(bit_mask[:, 0], 1))
         if valid.any():
             orig_rgb = torch.zeros_like(orig_rgb)
@@ -297,24 +300,23 @@ class Merger(Evaluator):
     def train_one_batch(self, bit_mask, cur_pts):
         bit_mask = bit_mask.to(self.device)
         cur_mask = bit_mask.bool()
-        sigma = torch.zeros(cur_mask.shape, device=self.device)
+        # sigma = torch.zeros(cur_mask.shape, device=self.device)
         rgb = torch.zeros((*cur_mask.shape, 3), device=self.device)
         orig_rgb = torch.zeros((*cur_mask.shape, 3), device=self.device)
 
         with torch.no_grad():
             cur_dirs = cur_pts[..., 3:].to(self.device)
             cur_pts = cur_pts[..., :3].to(self.device)
-            xyz_sampled = self.tensorf.normalize_coord(cur_pts)
-            sigma_feature = self.tensorf.compute_densityfeature(xyz_sampled[cur_mask])
-            validsigma = self.tensorf.feature2density(sigma_feature)
-            sigma.masked_scatter_(cur_mask, validsigma)
-            self.target.renderModule.ignore_control = True
-            orig_rgb[cur_mask] = self.tensorf.compute_radiance(xyz_sampled[cur_mask], cur_dirs[cur_mask])
-            assert self.tensorf.renderModule.orig_rgb is None
+            # xyz_sampled = self.tensorf.normalize_coord(cur_pts)
+            # sigma_feature = self.tensorf.compute_densityfeature(xyz_sampled[cur_mask])
+            # validsigma = self.tensorf.feature2density(sigma_feature)
+            # sigma.masked_scatter_(cur_mask, validsigma)
+            self.tensorf.compute_alpha(cur_pts[cur_mask])
+            orig_rgb[cur_mask] = self.tensorf.compute_radiance(cur_pts[cur_mask], cur_dirs[cur_mask], orig=True)
+            # assert self.tensorf.renderModule.orig_rgb is None
 
-        self.target.renderModule.ignore_control = False
-        rgb[cur_mask] = self.tensorf.compute_radiance(xyz_sampled[cur_mask], cur_dirs[cur_mask])
-        loss_dict = self.compute_diff_loss(sigma_feature, rgb, orig_rgb, bit_mask)
+        rgb[cur_mask] = self.tensorf.compute_radiance(cur_pts[cur_mask], cur_dirs[cur_mask], orig=False)
+        loss_dict = self.compute_diff_loss(cur_mask, rgb, orig_rgb, bit_mask)
         loss_weight = {k: v for k in loss_dict.keys() if (v := getattr(self.args, k, None)) is not None}
         loss_total = sum(v * loss_weight.get(k, 1) for k, v in loss_dict.items())
         self.optimizer.zero_grad()
@@ -324,17 +326,16 @@ class Merger(Evaluator):
 
     def poisson_editing(self, pts, mask, dists, batch_size=65536):
         args = self.args
+        cfg = self.cfg
         dataset = TensorDataset(pts, mask, dists)
-        data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=True)
-        save_path = Path(args.basedir, args.expname, 'imgs_test_iters')
+        data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=True)
+        save_path = Path(cfg.basedir, cfg.expname, 'imgs_test_iters')
         pbar = tqdm(chain.from_iterable(repeat(data_loader)))
         loss = None
 
         grad_vars = chain(
-            self.target.basis_mat_ctl.parameters(),
-            self.target.app_plane_ctl.parameters(),
-            self.target.app_line_ctl.parameters(),
-            self.target.renderModule.mlp_control.parameters(),
+            self.target.k0_new.parameters(),
+            self.target.rgbnet_new.parameters(),
         )
         self.optimizer = torch.optim.Adam(grad_vars, lr=args.lr_basis, betas=(0.9, 0.99))
         save_path.mkdir(exist_ok=True)
@@ -345,12 +346,12 @@ class Merger(Evaluator):
             loss_dict = self.train_one_batch(cur_mask, cur_pts)
             pbar.set_description(', '.join(f'{k}: {v:.4f}' for k, v in loss_dict.items()))
 
-            cur_idx = next(batch_counter)
-            total = self.test_dataset.all_rays.shape[0]
-            test_idx = cur_idx % total
-            with torch.no_grad():
-                self.eval_sample(test_idx, self.test_dataset.all_rays[test_idx], save_path, f'it{cur_idx:06d}_',
-                                 N_samples=-1, white_bg=self.test_dataset.white_bg, save_GT=False)
+            # cur_idx = next(batch_counter)
+            # total = self.test_dataset.all_rays.shape[0]
+            # test_idx = cur_idx % total
+            # with torch.no_grad():
+            #     self.eval_sample(test_idx, self.test_dataset.all_rays[test_idx], save_path, f'it{cur_idx:06d}_',
+            #                      N_samples=-1, white_bg=self.test_dataset.white_bg, save_GT=False)
 
         return loss
 
@@ -411,6 +412,7 @@ def config_parser():
                         help='frequency of console printout and metric loggin')
     parser.add_argument("--i_weights", type=int, default=100000,
                         help='frequency of weight ckpt saving')
+    parser.add_argument("--lr_basis", type=float, default=1e-3, help='learning rate')
     return parser
 
 
@@ -422,7 +424,6 @@ def config_parser_merge(parser):
 
     parser.add_argument('--downsample_test', type=float, default=1.0)
     parser.add_argument('--matrix', type=float, nargs='+', default=())
-    parser.add_argument("--lr_basis", type=float, default=1e-3, help='learning rate')
     parser.add_argument("--batch_size", type=int, default=8192)
 
     # network decoder

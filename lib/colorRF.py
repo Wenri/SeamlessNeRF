@@ -90,12 +90,15 @@ class MultipleGridMask(torch.nn.ModuleList):
 class ColorVoxE(DirectVoxGO):
     def __init__(self, *args, device=torch.device('cuda'), **kwargs):
         self.args = None
+        self.tgt_k0 = None
+        self.tgt_logit = None
         self.tgt_rgb = None
         self.tgt_density = None
         self.idx = None
         self.render_gap = 1
         self.density_gain = 1
         self.device = device
+        self.orig = False
         super().__init__(*args, **kwargs)
 
     @property
@@ -127,6 +130,8 @@ class ColorVoxE(DirectVoxGO):
         return alpha
 
     def add_merge_target(self, model, matrix):
+        model.add_module('k0_new', torch_copy(model.k0))
+        model.add_module('rgbnet_new', torch_copy(model.rgbnet))
         self.add_module('target', model)
         self.register_buffer('matrix', torch.linalg.inv(torch.as_tensor(matrix).view(4, 4)))
         self.mask_cache.register_forward_hook(self.hook_mask_cache)
@@ -154,17 +159,45 @@ class ColorVoxE(DirectVoxGO):
 
     def hook_k0(self, module, inp, out):
         shifted_pts = self.shift_and_scale(inp[0])
-        tgt = self.target.k0(shifted_pts)
-        return torch.where((self.idx > 0.5).unsqueeze(-1), out, tgt)
+        func = self.target.k0 if self.orig else self.target.k0_new
+        self.tgt_k0 = func(shifted_pts)
+        return torch.where((self.idx > 0.5).unsqueeze(-1), out, self.tgt_k0)
 
     def hook_rgb(self, module, inp, out):
-        tgt = self.target.rgbnet(inp[0])
-        return torch.where((self.idx > 0.5).unsqueeze(-1), out, tgt)
+        viewdirs_emb = inp[0][:, self.tgt_k0.shape[-1]:]
+        viewdirs = self.shift_and_scale(viewdirs_emb[:, :3])
+        viewdirs_emb = (viewdirs.unsqueeze(-1) * self.viewfreq).flatten(-2)
+        viewdirs_emb = torch.cat([viewdirs, viewdirs_emb.sin(), viewdirs_emb.cos()], -1)
+        viewdirs_emb = viewdirs_emb.flatten(0, -2)
+        rgb_feat = torch.cat([self.tgt_k0, viewdirs_emb], -1)
+        func = self.target.rgbnet if self.orig else self.target.rgbnet_new
+        self.tgt_logit = func(rgb_feat)
+        return torch.where((self.idx > 0.5).unsqueeze(-1), out, self.tgt_logit)
 
     def hook_mask_cache(self, module, inp, out):
         shifted_pts = self.shift_and_scale(inp[0])
         tgt = self.target.mask_cache(shifted_pts.contiguous())
         return torch.logical_or(out, tgt)
+
+    def compute_radiance(self, ray_pts, viewdirs, orig=False):
+        # query for color
+        assert not self.rgbnet_full_implicit
+        assert self.rgbnet is not None
+        assert self.rgbnet_direct
+
+        self.orig = orig
+        k0_view = self.k0(ray_pts)
+
+        # view-dependent color emission
+        viewdirs_emb = (viewdirs.unsqueeze(-1) * self.viewfreq).flatten(-2)
+        viewdirs_emb = torch.cat([viewdirs, viewdirs_emb.sin(), viewdirs_emb.cos()], -1)
+        viewdirs_emb = viewdirs_emb.flatten(0, -2)
+        rgb_feat = torch.cat([k0_view, viewdirs_emb], -1)
+        rgb_logit = self.rgbnet(rgb_feat)
+        rgb = torch.sigmoid(rgb_logit)
+        self.tgt_rgb = torch.sigmoid(self.tgt_logit)
+
+        return rgb
 
 # class ColorVMSplit(TensorVMSplit):
 
