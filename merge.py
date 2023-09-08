@@ -137,6 +137,30 @@ class Evaluator:
 
         print('Done')
 
+    def eval_sample(self, test_idx, save_path, prtx):
+        args = self.args
+        data_dict = self.data_dict
+        cfg = self.cfg
+        ckpt_name = self.ckpt_name
+        render_viewpoints_kwargs = self.render_viewpoints_kwargs
+
+        testsavedir = os.path.join(cfg.basedir, cfg.expname, f'render_test_{ckpt_name}')
+        os.makedirs(testsavedir, exist_ok=True)
+
+        im_id = data_dict['i_test'][test_idx]
+        render_poses = data_dict['poses'][im_id:im_id + 1]
+        HW = data_dict['HW'][im_id:im_id + 1]
+        Ks = data_dict['Ks'][im_id:im_id + 1]
+        gt_imgs = [data_dict['images'][im_id].cpu().numpy()]
+
+        rgbs, depths, bgmaps = render_viewpoints(
+            render_poses=render_poses, HW=HW, Ks=Ks, gt_imgs=gt_imgs,
+            savedir=testsavedir, dump_images=args.dump_images,
+            eval_ssim=args.eval_ssim, eval_lpips_alex=args.eval_lpips_alex, eval_lpips_vgg=args.eval_lpips_vgg,
+            **render_viewpoints_kwargs)
+        rgb_map = (rgbs[0] * 255).astype('uint8')
+        imageio.imwrite(save_path / f'{prtx}.png', rgb_map)
+
 
 class Merger(Evaluator):
     def __init__(self, args, pool):
@@ -346,12 +370,11 @@ class Merger(Evaluator):
             loss_dict = self.train_one_batch(cur_mask, cur_pts)
             pbar.set_description(', '.join(f'{k}: {v:.4f}' for k, v in loss_dict.items()))
 
-            # cur_idx = next(batch_counter)
-            # total = self.test_dataset.all_rays.shape[0]
-            # test_idx = cur_idx % total
-            # with torch.no_grad():
-            #     self.eval_sample(test_idx, self.test_dataset.all_rays[test_idx], save_path, f'it{cur_idx:06d}_',
-            #                      N_samples=-1, white_bg=self.test_dataset.white_bg, save_GT=False)
+            cur_idx = next(batch_counter)
+            total = len(self.data_dict['i_test'])
+            test_idx = cur_idx % total
+            with torch.no_grad():
+                self.eval_sample(test_idx, save_path, f'it{cur_idx:06d}_')
 
         return loss
 
