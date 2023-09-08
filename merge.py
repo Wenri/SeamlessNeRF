@@ -151,13 +151,8 @@ class Evaluator:
         render_poses = data_dict['poses'][im_id:im_id + 1]
         HW = data_dict['HW'][im_id:im_id + 1]
         Ks = data_dict['Ks'][im_id:im_id + 1]
-        gt_imgs = [data_dict['images'][im_id].cpu().numpy()]
 
-        rgbs, depths, bgmaps = render_viewpoints(
-            render_poses=render_poses, HW=HW, Ks=Ks, gt_imgs=gt_imgs,
-            savedir=testsavedir, dump_images=args.dump_images,
-            eval_ssim=args.eval_ssim, eval_lpips_alex=args.eval_lpips_alex, eval_lpips_vgg=args.eval_lpips_vgg,
-            **render_viewpoints_kwargs)
+        rgbs, depths, bgmaps = render_viewpoints(render_poses=render_poses, HW=HW, Ks=Ks, **render_viewpoints_kwargs)
         rgb_map = (rgbs[0] * 255).astype('uint8')
         imageio.imwrite(save_path / f'{prtx}.png', rgb_map)
 
@@ -352,7 +347,8 @@ class Merger(Evaluator):
         args = self.args
         cfg = self.cfg
         dataset = TensorDataset(pts, mask, dists)
-        data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=True)
+        data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=True,
+                                 generator=torch.Generator(device='cuda'))
         save_path = Path(cfg.basedir, cfg.expname, 'imgs_test_iters')
         pbar = tqdm(chain.from_iterable(repeat(data_loader)))
         loss = None
