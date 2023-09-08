@@ -9,6 +9,8 @@ from numpy.lib.format import open_memmap
 from pytorch3d.ops import knn_points
 from torch import nn
 
+from lib.dvgo import DirectVoxGO
+
 
 def torch_copy(obj):
     buffer = io.BytesIO()  # read from buffer
@@ -84,6 +86,54 @@ class MultipleGridMask(torch.nn.ModuleList):
         alpha_vals, idx = torch.stack(alpha_vals, dim=0).max(dim=0)
         return alpha_vals
 
+
+class ColorVoxE(DirectVoxGO):
+    def __init__(self, *args, device=torch.device('cuda'), **kwargs):
+        self.args = None
+        self.tgt_rgb = None
+        self.tgt_density = None
+        self.idx = None
+        self.render_gap = 1
+        self.density_gain = 1
+        self.device = device
+        super().__init__(*args, **kwargs)
+
+    @property
+    def aabb(self):
+        return torch.stack((self.xyz_min, self.xyz_max), dim=0)
+
+    def getDenseAlpha(self, gridSize=None, aabb=None, **render_kwargs):
+        aabb = self.aabb if aabb is None else aabb
+        gridSize = self.gridSize if gridSize is None else gridSize
+
+        samples = torch.stack(torch.meshgrid(
+            torch.linspace(0, 1, gridSize[0]),
+            torch.linspace(0, 1, gridSize[1]),
+            torch.linspace(0, 1, gridSize[2]),
+        ), -1).to(self.device)
+        dense_xyz = aabb[0] * (1 - samples) + aabb[1] * samples
+
+        # dense_xyz = dense_xyz
+        # print(self.stepSize, self.distance_scale*self.aabbDiag)
+        alpha = torch.zeros_like(dense_xyz[..., 0])
+        stepSize = render_kwargs['stepsize'] * self.voxel_size_ratio
+        for i in range(gridSize[0]):
+            alpha[i] = self.compute_alpha(dense_xyz[i].view(-1, 3), stepSize).view((gridSize[1], gridSize[2]))
+        return alpha, dense_xyz
+
+    def compute_alpha(self, ray_pts, interval=1):
+        density = self.density(ray_pts)
+        alpha = self.activate_density(density, interval)
+        return alpha
+
+    def add_merge_target(self, model, matrix):
+        self.add_module('target', model)
+        self.register_buffer('matrix', torch.linalg.inv(torch.as_tensor(matrix).view(4, 4)))
+        self.mask_cache.register_forward_hook(self.hook_mask_cache)
+        self.density.register_forward_hook(self.hook_density)
+        self.k0.register_forward_hook(self.hook_k0)
+        self.rgbnet.register_forward_hook(self.hook_rgb)
+
     def shift_and_scale(self, xyz_sampled):
         ones = torch.ones(xyz_sampled.shape[:-1], dtype=xyz_sampled.dtype, device=xyz_sampled.device)
         xyz_sampled = torch.cat((xyz_sampled, ones.unsqueeze(-1)), dim=-1)
@@ -92,24 +142,36 @@ class MultipleGridMask(torch.nn.ModuleList):
         xyz_sampled = xyz_sampled @ t_matrix
         return xyz_sampled[..., :3]
 
-#
+    def hook_density(self, module, inp, out):
+        shifted_pts = self.shift_and_scale(inp[0])
+        self.tgt_density = self.target.density(shifted_pts)
+
+    def activate_density(self, density, interval=None):
+        src = super().activate_density(density, interval)
+        tgt = self.target.activate_density(self.tgt_density, interval)
+        _, self.idx = torch.stack((tgt * self.render_gap, src * self.density_gain), dim=0).max(dim=0)
+        return torch.where(self.idx > 0.5, src, tgt)
+
+    def hook_k0(self, module, inp, out):
+        shifted_pts = self.shift_and_scale(inp[0])
+        tgt = self.target.k0(shifted_pts)
+        return torch.where((self.idx > 0.5).unsqueeze(-1), out, tgt)
+
+    def hook_rgb(self, module, inp, out):
+        tgt = self.target.rgbnet(inp[0])
+        return torch.where((self.idx > 0.5).unsqueeze(-1), out, tgt)
+
+    def hook_mask_cache(self, module, inp, out):
+        shifted_pts = self.shift_and_scale(inp[0])
+        tgt = self.target.mask_cache(shifted_pts.contiguous())
+        return torch.logical_or(out, tgt)
+
 # class ColorVMSplit(TensorVMSplit):
-#     def __init__(self, *args, at_least_aabb=None, **kwargs):
-#         self.merge_target = []
-#         self.args = None
-#         self.tgt_rgb = None
-#         self.render_gap = 1
-#         self.density_gain = 1
-#         self.at_least_aabb = at_least_aabb
-#         super().__init__(*args, **kwargs)
+
 #
 #     def init_render_func(self, shadingMode, pos_pe=6, view_pe=6, fea_pe=6, featureC=128, *args, **kwargs):
 #         return super().init_render_func(shadingMode, pos_pe, view_pe, fea_pe, featureC, **kwargs)
 #
-#     def getDenseAlpha(self, gridSize=None, aabb=None):
-#         if aabb is None:
-#             aabb = getattr(self, 'merged_aabb', None)
-#         return super().getDenseAlpha(gridSize, aabb)
 #
 #     def add_merge_target(self, model, density_gain, render_gap=None):
 #         if isinstance(self.alphaMask, AlphaGridMask):
