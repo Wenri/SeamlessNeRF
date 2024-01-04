@@ -4,6 +4,8 @@ from contextlib import nullcontext
 from functools import partial
 from itertools import zip_longest
 
+import numpy as np
+
 import torch
 from numpy.lib.format import open_memmap
 from pytorch3d.ops import knn_points
@@ -209,9 +211,12 @@ class ColorVMSplit(TensorVMSplit):
         return super().forward(*params, **kwargs)
 
     def enable_trainable_control(self):
-        self.add_module('app_plane_ctl', torch_copy(self.app_plane))
-        self.add_module('app_line_ctl', torch_copy(self.app_line))
-        self.add_module('basis_mat_ctl', torch_copy(self.basis_mat))
+        if not hasattr(self, 'app_plane_ctl'):
+            self.add_module('app_plane_ctl', torch_copy(self.app_plane))
+        if not hasattr(self, 'app_line_ctl'):
+            self.add_module('app_line_ctl', torch_copy(self.app_line))
+        if not hasattr(self, 'basis_mat_ctl'):
+        	self.add_module('basis_mat_ctl', torch_copy(self.basis_mat))
 
     def update_stepSize(self, gridSize):
         ret = super().update_stepSize(gridSize)
@@ -225,6 +230,7 @@ class ColorVMSplit(TensorVMSplit):
             new_aabb[0] = torch.minimum(new_aabb[0], at_least[0])
             new_aabb[1] = torch.maximum(new_aabb[1], at_least[1])
         return new_aabb
+
 
 
 class PoissonMLPRender(MLPRender_Fea):
@@ -254,10 +260,11 @@ class PoissonMLPRender(MLPRender_Fea):
         return output + self.mlp_control(*data_in)
 
     def enable_trainable_control(self):
-        new_mlp = torch_copy(self.mlp)
-        zero_conv = nn.Linear(3, 3)
-        torch.nn.init.constant_(zero_conv.bias, 0)
-        torch.nn.init.constant_(zero_conv.weight, 0)
-        new_mlp.append(zero_conv)
-        new_mlp.cuda()
-        self.add_module('mlp_control', new_mlp)
+        if not hasattr(self, 'mlp_control'):
+            new_mlp = torch_copy(self.mlp)
+            zero_conv = nn.Linear(3, 3)
+            torch.nn.init.constant_(zero_conv.bias, 0)
+            torch.nn.init.constant_(zero_conv.weight, 0)
+            new_mlp.append(zero_conv)
+            new_mlp.cuda()
+            self.add_module('mlp_control', new_mlp)

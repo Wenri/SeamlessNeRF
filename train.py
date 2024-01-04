@@ -159,8 +159,9 @@ class Trainer:
         if ckpt is not None and os.path.exists(ckpt):
             ckpt = torch.load(ckpt, map_location=self.device)
             kwargs = ckpt['kwargs']
-            kwargs.update({'device': self.device,
-                           'palette': self.pick_palette()})
+            # kwargs.update({'device': self.device,
+            #                'palette': self.pick_palette()})
+            kwargs.update({'device': self.device})
             tensorf = args.model_name(**kwargs)
             tensorf.load(ckpt)
         elif args.render_only:
@@ -277,8 +278,8 @@ class Trainer:
         # init log file
         os.makedirs(logfolder, exist_ok=True)
         os.makedirs(f'{logfolder}/imgs_vis', exist_ok=True)
-        os.makedirs(f'{logfolder}/imgs_rgba', exist_ok=True)
-        os.makedirs(f'{logfolder}/rgba', exist_ok=True)
+        # os.makedirs(f'{logfolder}/imgs_rgba', exist_ok=True)
+        # os.makedirs(f'{logfolder}/rgba', exist_ok=True)
         self.summary_writer = SummaryWriter(os.fspath(logfolder))
 
     def reconstruction(self):

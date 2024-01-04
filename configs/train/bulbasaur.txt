@@ -1,6 +1,6 @@
 dataset_name = blender
-datadir = /research/d1/gds/yhwang21/datasets/seamless_nerf_datasets/female_sculpture/
-expname = female_sculpture_tensorfvm
+datadir = data/seamless/bulbasaur/
+expname = bulbasaur_tensorfvm
 basedir = ./logs
 
 n_iters = 30000
@@ -10,8 +10,9 @@ N_voxel_init = 2097156 # 128**3
 N_voxel_final = 27000000 # 300**3
 upsamp_list = [2000,3000,4000,5500,7000]
 update_AlphaMask_list = [2000,4000]
+at_least_aabb = [-1.1020, -1.0075, -0.7548, 0.7813, 1.0075, 0.6496]
 step_ratio = 0.5
-at_least_aabb = [-0.4606, -0.6732, 0.0591, 0.5315, 0.2008, 0.5787]
+# at_least_aabb = [-1.1220, -1.0276, -0.8386,  0.7913,  1.0276,  0.6496]
 
 N_vis = 5
 vis_every = 10000
@@ -33,6 +34,7 @@ fea_pe = 2
 L1_weight_inital = 8e-5
 L1_weight_rest = 4e-5
 rm_weight_mask_thre = 1e-4
+init_density_scale = 0.4
 
 ## please uncomment following configuration if hope to training on cp model
 #model_name = TensorCP

@@ -1,5 +1,6 @@
 import os
 import shutil
+import datetime
 from contextlib import suppress
 from itertools import repeat, chain, count
 from multiprocessing.pool import ThreadPool
@@ -21,6 +22,12 @@ from models.colorRF import DensityFeature
 from utils import convert_sdf_samples_to_ply, cal_n_samples
 
 
+def has_trainable_control(ckpt):
+    for k in ckpt['state_dict']:
+        if k.find('app_plane_ctl') >= 0 or k.find('app_line_ctl') >= 0 or k.find('mlp_control') >= 0:
+            return True
+    return False
+
 class Merger(Evaluator):
     def __init__(self, args, pool):
         self.args = args
@@ -36,6 +43,7 @@ class Merger(Evaluator):
         super().__init__(self.build_network(), args, test_dataset, train_dataset, pool=pool)
         self.tensorf.args = self.args
         self.optimizer = None
+        self.compute_psnr = False
 
     def build_network(self, ckpt=None):
         args = self.args
@@ -46,10 +54,15 @@ class Merger(Evaluator):
             raise RuntimeError(f'the ckpt {ckpt} does not exists!!')
 
         ckpt = torch.load(ckpt, map_location=self.device)
+        # ckpt = torch.load(ckpt)
         kwargs = ckpt['kwargs']
         kwargs.update({'device': self.device})
         tensorf = args.model_name(**kwargs)
+        if has_trainable_control(ckpt):
+            tensorf.renderModule.enable_trainable_control()
+            tensorf.enable_trainable_control()
         tensorf.load(ckpt)
+        # tensorf.to(self.device)
 
         return tensorf
 
@@ -68,15 +81,21 @@ class Merger(Evaluator):
         convert_sdf_samples_to_ply(alpha.cpu(), save_path, bbox=bbox.cpu(), level=0.005)
 
     @torch.no_grad()
-    def export_pointcloud(self, tensorf=None):
+    def export_pointcloud(self, tensorf=None, prefix=None):
         args = self.args
+        if not prefix:
+            prefix = args.expname
         save_path = Path(args.basedir, args.expname)
         if tensorf is None:
             tensorf = self.tensorf
-            save_path = save_path / args.expname
+            save_path = save_path / prefix
         else:
-            save_path = save_path / os.path.basename(args.ckpt)
-        save_path = save_path.with_stem(save_path.stem + '_pc').with_suffix('.ply')
+            if not prefix:
+                save_path = save_path / os.path.basename(args.ckpt)
+            else:
+                save_path = save_path / prefix
+        # save_path = save_path.with_stem(save_path.stem + '_pc').with_suffix('.ply')
+        save_path = save_path.with_name(save_path.stem + '_pc.ply')
         gridSize = tensorf.gridSize   # * 2
         alpha, xyz = tensorf.getDenseAlpha(gridSize)
         pts = xyz[alpha > 0.005]
@@ -142,7 +161,7 @@ class Merger(Evaluator):
             self.logger.info('Loading all_query_pts from cached into GPU...')
             with suppress(Exception):
                 all_query_pts = torch.from_numpy(open_memmap(pts_path, mode='r')).to(self.device)
-                if torch.allclose(pts, all_query_pts.view(-1, 7, 3)[:, 0]):
+                if torch.allclose(pts, all_query_pts.view(-1, 7, 3)[:, 0], atol=1e-6):
                     return all_query_pts
             self.logger.warn('Cached query_pts mismatch. Regenerating...')
             parent = pts_path.parent
@@ -161,29 +180,37 @@ class Merger(Evaluator):
 
     @torch.no_grad()
     def load_aval_pts(self, pts_path: Path):
-        pts_path = pts_path.with_stem('aval_pts')
+        # pts_path = pts_path.with_stem('aval_pts')
+        pts_path = pts_path.with_name('aval_pts.npy')
         if pts_path.exists():
             self.logger.info('Loading aval_pts from cached...')
             with suppress(Exception):
                 aval_pts = torch.from_numpy(open_memmap(pts_path, mode='r'))
-                aval_id = torch.from_numpy(open_memmap(pts_path.with_stem('aval_id'), mode='r'))
-                aval_rep = torch.from_numpy(open_memmap(pts_path.with_stem('aval_rep'), mode='r'))
+                # aval_id = torch.from_numpy(open_memmap(pts_path.with_stem('aval_id'), mode='r'))
+                # aval_rep = torch.from_numpy(open_memmap(pts_path.with_stem('aval_rep'), mode='r'))
+                aval_id = torch.from_numpy(open_memmap(pts_path.with_name('aval_id.npy'), mode='r'))
+                aval_rep = torch.from_numpy(open_memmap(pts_path.with_name('aval_rep.npy'), mode='r'))
                 return aval_pts, aval_id, aval_rep
 
         self.logger.warn('Calc aval_pts using CUDA...')
         aval_pts, aval_id, aval_rep = self.sample_filter_dataset(pts_path, self.args.batch_size)
-        np.save(pts_path.with_stem('aval_id'), aval_id.numpy())
-        np.save(pts_path.with_stem('aval_rep'), aval_rep.numpy())
+        # np.save(pts_path.with_stem('aval_id'), aval_id.numpy())
+        # np.save(pts_path.with_stem('aval_rep'), aval_rep.numpy())
+        np.save(pts_path.with_name('aval_id.npy'), aval_id.numpy())
+        np.save(pts_path.with_name('aval_rep.npy'), aval_rep.numpy())
         return aval_pts, aval_id, aval_rep
 
     @torch.no_grad()
     def load_ball_pts(self, ptsPath: Path, pts, all_query_pts, aval_rep):
-        ptsPath = ptsPath.with_stem('ball_dists')
+        # ptsPath = ptsPath.with_stem('ball_dists')
+        ptsPath = ptsPath.with_name('ball_dists.npy')
         if ptsPath.exists():
             self.logger.info('Loading ball_pts from cached...')
             ball_dists = torch.from_numpy(open_memmap(ptsPath, mode='r'))
-            ball_idx = torch.from_numpy(open_memmap(ptsPath.with_stem('ball_idx'), mode='r'))
-            ball_knn = torch.from_numpy(open_memmap(ptsPath.with_stem('ball_knn'), mode='r'))
+            # ball_idx = torch.from_numpy(open_memmap(ptsPath.with_stem('ball_idx'), mode='r'))
+            # ball_knn = torch.from_numpy(open_memmap(ptsPath.with_stem('ball_knn'), mode='r'))
+            ball_idx = torch.from_numpy(open_memmap(ptsPath.with_name('ball_idx.npy'), mode='r'))
+            ball_knn = torch.from_numpy(open_memmap(ptsPath.with_name('ball_knn.npy'), mode='r'))
         else:
             self.logger.warn('Calc ball_pts using CUDA...')
             aval_rep_pts = aval_rep[None, ..., :3].cuda()
@@ -194,25 +221,30 @@ class Merger(Evaluator):
             self.logger.warn('Using Mdn = %f', mdn)
             ball_dists, ball_idx, ball_knn = ball_query(all_query_pts[None].cuda(), aval_rep_pts, K=10, radius=mdn)
             np.save(ptsPath, (ball_dists := ball_dists.cpu()).numpy())
-            np.save(ptsPath.with_stem('ball_idx'), (ball_idx := ball_idx.cpu()).numpy())
-            np.save(ptsPath.with_stem('ball_knn'), (ball_knn := ball_knn.cpu()).numpy())
+            # np.save(ptsPath.with_stem('ball_idx'), (ball_idx := ball_idx.cpu()).numpy())
+            # np.save(ptsPath.with_stem('ball_knn'), (ball_knn := ball_knn.cpu()).numpy())
+            np.save(ptsPath.with_name('ball_idx.npy'), (ball_idx := ball_idx.cpu()).numpy())
+            np.save(ptsPath.with_name('ball_knn.npy'), (ball_knn := ball_knn.cpu()).numpy())
 
         ball_dists = rearrange(ball_dists, '1 (n d) k -> n d k', n=pts.shape[0])
         return ball_dists, ball_idx.view(*ball_dists.shape), ball_knn.view(*ball_dists.shape, 3)
 
     @torch.no_grad()
     def load_knn_pts(self, pts_path: Path, pts, aval_rep):
-        pts_path = pts_path.with_stem('knn_dists')
+        # pts_path = pts_path.with_stem('knn_dists')
+        pts_path = pts_path.with_name('knn_dists.npy')
         if pts_path.exists():
             self.logger.info('Loading knn_pts from cached...')
             knn_dists = torch.from_numpy(open_memmap(pts_path, mode='r'))
-            knn_idx = torch.from_numpy(open_memmap(pts_path.with_stem('knn_idx'), mode='r'))
+            # knn_idx = torch.from_numpy(open_memmap(pts_path.with_stem('knn_idx'), mode='r'))
+            knn_idx = torch.from_numpy(open_memmap(pts_path.with_name('knn_idx.npy'), mode='r'))
         else:
             self.logger.warn('Calc knn_pts using CUDA...')
             knn_dists, knn_idx, _ = knn_points(pts[None].cuda(), aval_rep[None, ..., :3].cuda(), K=100,
                                                return_sorted=True)
             np.save(pts_path, (knn_dists := knn_dists.cpu()).numpy())
-            np.save(pts_path.with_stem('knn_idx'), (knn_idx := knn_idx.cpu()).numpy())
+            # np.save(pts_path.with_stem('knn_idx'), (knn_idx := knn_idx.cpu()).numpy())
+            np.save(pts_path.with_name('knn_idx.npy'), (knn_idx := knn_idx.cpu()).numpy())
         return knn_dists.squeeze(0), knn_idx.squeeze(0)
 
     @torch.no_grad()
@@ -315,6 +347,7 @@ class Merger(Evaluator):
         save_path.mkdir(exist_ok=True)
         (save_path / 'rgbd').mkdir(exist_ok=True)
 
+
         batch_counter = count()
         for cur_pts, cur_mask, cur_dist in pbar:
             loss_dict = self.train_one_batch(cur_mask, cur_pts)
@@ -327,22 +360,52 @@ class Merger(Evaluator):
                 self.eval_sample(test_idx, self.test_dataset.all_rays[test_idx], save_path, f'it{cur_idx:06d}_',
                                  N_samples=-1, white_bg=self.test_dataset.white_bg, save_GT=False)
 
+            if cur_idx >= args.ft_iters:
+                break
+
         return loss
 
     def merge(self):
         if self.args.export_mesh:
-            self.export_mesh(prefix=os.path.basename(self.args.datadir))
+            # self.export_mesh(prefix=os.path.basename(self.args.datadir))
+            self.export_mesh(prefix='source')
         self.target.renderModule.enable_trainable_control()
         self.target.enable_trainable_control()
         self.tensorf.add_merge_target(self.target, self.args.density_gain, self.args.render_gap)
         if self.args.export_mesh:
-            self.export_mesh(self.target)
-            self.export_mesh()
-        pts = self.export_pointcloud()
+            self.export_mesh(self.target, 'target')
+            self.export_mesh(prefix='merged')
+        pts = self.export_pointcloud(prefix='merged')
         pts, mask, dists = self.generate_grad(pts)
-        if self.args.export_mesh:
-            self.render_test()
-        self.poisson_editing(pts, mask, dists)
+
+        if not os.path.exists(os.path.join(self.args.basedir, self.args.expname, 'imgs_test_all_nope')):
+            self.render_test(prefix='imgs_test_all_nope')
+
+        if not self.args.merge_render_only:
+            self.poisson_editing(pts, mask, dists)
+
+            ckpt_savepath = os.path.join(self.args.basedir, self.args.expname, f'{Path(self.args.ckpt).stem}_ft.th')
+            self.target.save(ckpt_savepath)
+
+        self.render_test(prefix='imgs_test_all_pe')
+
+    @torch.no_grad()
+    def render_test(self, prefix='imgs_test_all'):
+        args = self.args
+        white_bg = self.test_dataset.white_bg
+        ndc_ray = args.ndc_ray
+
+        if self.summary_writer is not None:
+            logfolder = Path(self.summary_writer.log_dir)
+        else:
+            logfolder = Path(getattr(args, 'basedir', os.path.dirname(args.ckpt)), args.expname)
+            if getattr(args, 'add_timestamp', None):
+                logfolder = logfolder / datetime.now().strftime("-%Y%m%d-%H%M%S")
+
+        if args.render_test:
+            filePath = logfolder / prefix
+            self.evaluation(os.fspath(filePath), N_vis=-1, N_samples=-1, white_bg=white_bg, ndc_ray=ndc_ray)
+        return None 
 
 
 def config_parser(parser):
@@ -372,6 +435,8 @@ def config_parser(parser):
     parser.add_argument("--render_path", action="store_true")
     parser.add_argument("--export_mesh", action="store_true")
 
+    parser.add_argument("--merge_render_only", action="store_true")
+
     # rendering options
     parser.add_argument('--ndc_ray', type=int, default=0)
 
@@ -387,9 +452,13 @@ def config_parser(parser):
     # loss weight
     parser.add_argument("--loss_diff", type=float, help='weight for loss_diff')
 
+    parser.add_argument("--ft_iters", type=int, default=300, help='# of finetune iterations')
+
 
 def main(args):
     assert args.render_only
-    with ThreadPool() as pool:
-        merger = Merger(args, pool)
-        merger.merge()
+    # with ThreadPool() as pool:
+    #     merger = Merger(args, pool)
+    #     merger.merge()
+    merger = Merger(args, None)
+    merger.merge()

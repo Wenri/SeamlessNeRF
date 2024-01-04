@@ -76,5 +76,5 @@ def setup_environment(cudaMallocAsync=True):
 
 
 if __name__ == "__main__":
-    setup_environment()(config_parser())
+    setup_environment(cudaMallocAsync=True)(config_parser())
     # command(config_parser())
